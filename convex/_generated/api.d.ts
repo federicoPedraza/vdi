@@ -13,8 +13,8 @@ import type {
   FilterApi,
   FunctionReference,
 } from "convex/server";
+import type * as constants from "../constants.js";
 import type * as http from "../http.js";
-import type * as parserGenerator from "../parserGenerator.js";
 import type * as procedures from "../procedures.js";
 import type * as webhooks from "../webhooks.js";
 
@@ -27,8 +27,8 @@ import type * as webhooks from "../webhooks.js";
  * ```
  */
 declare const fullApi: ApiFromModules<{
+  constants: typeof constants;
   http: typeof http;
-  parserGenerator: typeof parserGenerator;
   procedures: typeof procedures;
   webhooks: typeof webhooks;
 }>;

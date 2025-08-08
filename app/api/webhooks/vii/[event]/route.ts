@@ -3,6 +3,13 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "@/convex/_generated/api";
 import { v4 as uuidv4 } from "uuid";
 
+function generateFingerprint(payload: any): string {
+  return Object
+    .keys(payload || {})
+    .sort()
+    .join('|');
+}
+
 export async function POST(request: NextRequest, { params }: { params: Promise<{ event: string }> }) {
     const { event } = await params;
     const body = await request.json();
@@ -12,23 +19,42 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL || 'https://famous-firefly-743.convex.cloud';
         const convex = new ConvexHttpClient(convexUrl);
 
-        console.log('Storing parser metadata for later processing...');
+        // Generate fingerprint from payload structure
+        const fingerprint = generateFingerprint(body);
 
-        const parserName = `vii_${event}_parser_${Date.now()}`;
+        // Check if we already have a parser for this fingerprint
+        const existingParser = await convex.query(api.procedures.getParserByFingerprint, {
+            fingerprint: fingerprint
+        });
+
+        if (existingParser) {
+                        console.log('✅ Found existing parser for fingerprint, reusing...');
+            console.log(`Existing parser: ${existingParser.uuid}`);
+
+            // TODO: Execute the existing parser here
+            console.log('🚀 Would execute existing parser...');
+            return NextResponse.json({
+                message: "Webhook received and processed with existing parser",
+                parserId: existingParser._id,
+                parserUuid: existingParser.uuid,
+                status: "reused",
+                fingerprint: fingerprint
+            }, { status: 200 });
+        }
+
+        console.log('No existing parser found, creating new one...');
 
         // Generate UUID for parser
         const parserUuid = uuidv4();
 
-        // Store parser with "building" state instead of processing immediately
+        // Store parser initially as idle and process later
         const parserId = await convex.mutation(api.procedures.storeParserBuildingPublic, {
             uuid: parserUuid,
-            name: parserName,
             language: "javascript",
             code: "// Parser code will be generated when processed", // Placeholder code
-            payloadSchema: body,
-            platform: "vii",
+            payload: JSON.stringify(body),
             event: event,
-            originalPayload: body, // Store the original payload for later processing
+            fingerprint,
         });
 
         console.log('✅ Parser saved with "building" state');
@@ -40,7 +66,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             message: "Webhook received and parser stored",
             parserId: parserId,
             parserUuid: parserUuid,
-            status: "building"
+            status: "idle"
         }, { status: 200 });
 
     } catch (error) {

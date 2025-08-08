@@ -120,3 +120,18 @@
     @apply bg-white text-foreground;
   }
 }
+
+/* Animated gradient helper for the landing title */
+@keyframes gradient-pan {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+.gradient-animate {
+  background-size: 200% 200%;
+  animation: gradient-pan 8s linear infinite;
+}

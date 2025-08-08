@@ -4,6 +4,13 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "@/convex/_generated/api";
 import { v4 as uuidv4 } from "uuid";
 
+function generateFingerprint(payload: any): string {
+  return Object
+    .keys(payload || {})
+    .sort()
+    .join('|');
+}
+
 // Tiendanube-specific webhook payload interface
 interface TiendanubeWebhookPayload {
   event: string;
@@ -34,14 +41,7 @@ export async function POST(
         const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL || 'https://famous-firefly-743.convex.cloud';
         const convex = new ConvexHttpClient(convexUrl);
 
-        console.log('Storing parser metadata for later processing...');
-
-        const parserName = `tiendanube_${event}_parser_${Date.now()}`;
-
-        // Generate UUID for parser
-        const parserUuid = uuidv4();
-
-        // Determine the payload to use for parser generation
+        // Determine the payload to use for parser generation first
         let payloadForParser: TiendanubeWebhookPayload | OrderDetailsPayload = body;
 
         // Check if this is an order-related event and fetch order details
@@ -77,16 +77,40 @@ export async function POST(
             }
         }
 
-        // Store parser with "building" state instead of processing immediately
+        // Generate fingerprint from payload structure
+        const fingerprint = generateFingerprint(payloadForParser);
+
+        // Check if we already have a parser for this fingerprint
+        const existingParser = await convex.query(api.procedures.getParserByFingerprint, {
+            fingerprint: fingerprint
+        });
+
+        if (existingParser) {
+            console.log('✅ Found existing parser for fingerprint, reusing...');
+            console.log(`Existing parser: ${existingParser.uuid}`);
+
+            return NextResponse.json({
+                message: "Webhook received and processed with existing parser",
+                parserId: existingParser._id,
+                parserUuid: existingParser.uuid,
+                status: "reused",
+                fingerprint: fingerprint
+            }, { status: 200 });
+        }
+
+        console.log('No existing parser found, creating new one...');
+
+        // Generate UUID for parser
+        const parserUuid = uuidv4();
+
+        // Store parser initially as idle and process later
         const parserId = await convex.mutation(api.procedures.storeParserBuildingPublic, {
             uuid: parserUuid,
-            name: parserName,
             language: "javascript",
             code: "// Parser code will be generated when processed", // Placeholder code
-            payloadSchema: payloadForParser,
-            platform: "tiendanube",
+            payload: JSON.stringify(payloadForParser),
             event: event,
-            originalPayload: payloadForParser, // Store the order details for later processing
+            fingerprint,
         });
 
         console.log('✅ Parser saved with "building" state');
@@ -98,7 +122,7 @@ export async function POST(
             message: "Webhook received and parser stored",
             parserId: parserId,
             parserUuid: parserUuid,
-            status: "building"
+            status: "idle"
         }, { status: 200 });
 
     } catch (error) {

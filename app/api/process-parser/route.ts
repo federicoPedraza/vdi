@@ -2,216 +2,176 @@ import { NextRequest, NextResponse } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../convex/_generated/api";
 import { Ollama } from "ollama";
+import { buildSystemPrompt } from "@/convex/constants";
+import { clientSchema, orderSchema, shippingSchema, orderLinesSchema } from "@/convex/schema";
+import { v4 as uuidv4 } from 'uuid';
 
 const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
-async function generateParserCode(platform: string, event: string, payload: any): Promise<string> {
+type ProcessLogger = {
+  setStep: (step: number) => void;
+  log: (message: string) => Promise<void> | void;
+  error: (message: string) => Promise<void> | void;
+};
+
+async function generateParserCode(event: string, payload: any, logger: ProcessLogger): Promise<string> {
   const startTime = Date.now();
-  console.log(`🚀 [${new Date().toISOString()}] Starting parser code generation`);
-  console.log(`   Platform: ${platform}`);
-  console.log(`   Event: ${event}`);
-  console.log(`   Payload size: ${JSON.stringify(payload).length} characters`);
+  logger.setStep(4);
+  await logger.log(`🚀 [${new Date().toISOString()}] Starting parser code generation`);
+  await logger.log(`Event: ${event}`);
+  await logger.log(`Payload size: ${JSON.stringify(payload).length} characters`);
+  const transformedPayload = simplifyPayload(payload);
+  await logger.log(`Payload simplified size: ${JSON.stringify(transformedPayload).length} characters`);
 
   const ollama = new Ollama({
     host: "http://localhost:11434"
   });
   const language = "javascript";
 
-  console.log(`⚙️  [${new Date().toISOString()}] Ollama client initialized`);
-  console.log(`   Host: http://localhost:11434`);
+  await logger.log(`⚙️  [${new Date().toISOString()}] Ollama client initialized`);
+  await logger.log(`Host: http://localhost:11434`);
 
-  // Prepare the system prompt with order schema information
-  const systemPrompt = `You are an expert developer that creates parsers to convert webhook payloads to a specific database schema.
+  const userPrompt = `You are generating code. Output ONLY raw ${language} code for a single function named exec with the exact signature: function exec(payload) { /* ... */ }.
 
-TARGET SCHEMA - Convert webhook payload to this exact structure:
+  Requirements:
+  - The function must be named exactly: exec
+  - It must accept one argument named payload
+  - It must return an object with at least the fields: { client: any, order: any }
+  - Do not include any markdown, comments, imports, or surrounding text
+  - Do not wrap in backticks
 
-CLIENT SCHEMA:
-{
-  email?: string,
-  phone?: string,
-  firstName?: string,
-  lastName?: string,
-  platformId: string, // ID from the external platform
-  platform: string, // platform name like "vii", "shopify", etc.
-  address?: {
-    street?: string,
-    city?: string,
-    state?: string,
-    country?: string,
-    zipCode?: string,
-  },
-  storeId?: string,
-}
+  Context:
+  Event: ${event}
+  Payload (representative structure):
+  ${JSON.stringify(transformedPayload)}
 
-ORDER SCHEMA:
-{
-  platformOrderId: string, // Order ID from external platform
-  platform: string, // platform name
-  orderNumber?: string,
-  status: string, // "pending", "paid", "fulfilled", "cancelled", etc.
-  total: number,
-  currency: string,
-  orderDate: number, // timestamp
-  paidDate?: number, // timestamp if paid
-  fulfilledDate?: number, // timestamp if fulfilled
-  notes?: string,
-  paymentMethod?: string,
-  storeId?: string,
-}
+  Return only the function code. Nothing else.`;
 
-SHIPPING SCHEMA (if applicable):
-{
-  trackingNumber?: string,
-  carrier?: string,
-  status: string, // "pending", "shipped", "delivered", "returned"
-  shippedDate?: number, // timestamp
-  deliveredDate?: number, // timestamp
-  shippingAddress: {
-    firstName?: string,
-    lastName?: string,
-    street?: string,
-    city?: string,
-    state?: string,
-    country?: string,
-    zipCode?: string,
-    phone?: string,
-  },
-  platform: string,
-}
-
-ORDER_LINES SCHEMA (if applicable):
-{
-  productId?: string,
-  sku?: string,
-  productName: string,
-  quantity: number,
-  unitPrice: number,
-  totalPrice: number,
-  platform: string,
-}
-
-INSTRUCTIONS:
-1. Create a ${language} function that takes a webhook payload and returns an object with:
-   - client: CLIENT_SCHEMA object
-   - order: ORDER_SCHEMA object
-   - shipping?: SHIPPING_SCHEMA object - only if shipping info exists
-   - orderLines?: Array of ORDER_LINES_SCHEMA objects - only if line items exist
-
-2. Handle missing fields gracefully - use fallback values or undefined
-3. Convert dates to timestamps (milliseconds since epoch)
-4. Ensure required fields are always present with sensible defaults
-5. Make the function robust - handle different payload structures
-6. Return only the function code, no explanations
-7. Function should be named 'exec'
-8. Handle errors gracefully and return null for unparseable data
-
-Example structure:
-\`\`\`${language}
-function exec(payload) {
-  try {
-    // Extract and transform data here
-    return {
-      client: { /* CLIENT_SCHEMA */ },
-      order: { /* ORDER_SCHEMA */ },
-      shipping: { /* SHIPPING_SCHEMA */ }, // optional
-      orderLines: [ /* ORDER_LINES_SCHEMA */ ] // optional
-    };
-  } catch (error) {
-    console.error('Parser error:', error);
-    return null;
-  }
-}
-\`\`\``;
-
-  const userPrompt = `Generate a parser for this webhook payload:
-
-Platform: ${platform}
-Event: ${event}
-
-Payload:
-${JSON.stringify(payload, null, 2)}
-
-Generate ONLY the function code in ${language}. No explanations, no markdown formatting, just the raw function code.`;
+  const systemPrompt = buildSystemPrompt(JSON.stringify(clientSchema), JSON.stringify(orderSchema), JSON.stringify(shippingSchema), JSON.stringify(orderLinesSchema));
 
   const promptTime = Date.now();
-  console.log(`📝 [${new Date().toISOString()}] Prompts prepared`);
-  console.log(`   System prompt length: ${systemPrompt.length} characters`);
-  console.log(`   User prompt length: ${userPrompt.length} characters`);
-  console.log(`   Preparation time: ${promptTime - startTime}ms`);
+  await logger.log(`📝 [${new Date().toISOString()}] Prompts prepared`);
+  await logger.log(`System prompt length: ${systemPrompt.length} characters`);
+  await logger.log(`User prompt length: ${userPrompt.length} characters`);
+  await logger.log(`Preparation time: ${promptTime - startTime}ms`);
 
   // Generate parser code using Ollama with retry logic
   let response;
   let retryCount = 0;
   const maxRetries = 3;
+  let generatedCode = "";
 
-  console.log(`🔄 [${new Date().toISOString()}] Starting Ollama generation (max ${maxRetries} attempts)`);
+  await logger.log(`🔄 [${new Date().toISOString()}] Starting Ollama generation (max ${maxRetries} attempts)`);
 
   while (retryCount < maxRetries) {
     const attemptStartTime = Date.now();
+    generatedCode = "";
+
     try {
-      console.log(`🎯 [${new Date().toISOString()}] Attempt ${retryCount + 1}/${maxRetries} - Starting Ollama request`);
-      console.log(`   Model: gpt-oss:20b`);
-      console.log(`   Temperature: 0.1`);
-      console.log(`   Max tokens: 2048`);
-      console.log(`   Keep alive: 10m`);
+      await logger.log(`🎯 [${new Date().toISOString()}] Attempt ${retryCount + 1}/${maxRetries} - Starting Ollama request`);
+      await logger.log(`Model: codellama:13b-instruct`);
+      await logger.log(`Temperature: 0.1`);
+      await logger.log(`Keep alive: 10m`);
 
       response = await ollama.chat({
-        model: "gpt-oss:20b",
+        model: "codellama:13b-instruct",
+        stream: true,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
         options: {
           temperature: 0.1, // Lower temperature for more consistent results
-          num_predict: 2048, // Limit response length
         },
         keep_alive: "10m" // Keep model loaded for 10 minutes
       });
 
+      let firstChunk = true;
+
+      for await (const chunk of response) {
+        if (firstChunk && !chunk?.message?.content?.trim())
+          break; // fallback early
+        generatedCode += chunk.message.content;
+      }
+
       const attemptTime = Date.now() - attemptStartTime;
-      console.log(`✅ [${new Date().toISOString()}] Ollama request successful`);
-      console.log(`   Attempt duration: ${attemptTime}ms`);
-      console.log(`   Response length: ${response?.message?.content?.length || 0} characters`);
+      await logger.log(`✅ [${new Date().toISOString()}] Ollama request successful`);
+      await logger.log(`Attempt duration: ${attemptTime}ms`);
+      await logger.log(`Response length: ${generatedCode.length} characters`);
       break; // Success, exit retry loop
-        } catch (error) {
+    } catch (error) {
       retryCount++;
       const attemptTime = Date.now() - attemptStartTime;
       const errorMessage = error instanceof Error ? error.message : String(error);
 
-      console.error(`❌ [${new Date().toISOString()}] Attempt ${retryCount} failed after ${attemptTime}ms`);
-      console.error(`   Error type: ${error instanceof Error ? error.constructor.name : 'Unknown'}`);
-      console.error(`   Error message: ${errorMessage}`);
+      await logger.error(`❌ [${new Date().toISOString()}] Attempt ${retryCount} failed after ${attemptTime}ms`);
+      await logger.error(`Error type: ${error instanceof Error ? error.constructor.name : 'Unknown'}`);
+      await logger.error(`Error message: ${errorMessage}`);
 
       if (retryCount >= maxRetries) {
         const totalTime = Date.now() - startTime;
-        console.error(`🚫 [${new Date().toISOString()}] All attempts failed`);
-        console.error(`   Total time: ${totalTime}ms`);
-        console.error(`   Total attempts: ${maxRetries}`);
+        await logger.error(`🚫 [${new Date().toISOString()}] All attempts failed`);
+        await logger.error(`Total time: ${totalTime}ms`);
+        await logger.error(`Total attempts: ${maxRetries}`);
         throw new Error(`Failed to generate parser after ${maxRetries} attempts: ${errorMessage}`);
       }
 
       // Wait before retrying (exponential backoff)
       const waitTime = Math.pow(2, retryCount) * 1000;
-      console.log(`⏳ [${new Date().toISOString()}] Retrying in ${waitTime/1000} seconds...`);
+      await logger.log(`⏳ [${new Date().toISOString()}] Retrying in ${waitTime / 1000} seconds...`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
     }
   }
 
-  const generatedCode = response?.message?.content;
   const totalTime = Date.now() - startTime;
 
-  console.log(`🔍 [${new Date().toISOString()}] Validating generated code`);
+  await logger.log(`🔍 [${new Date().toISOString()}] Validating generated code`);
 
-  if (!generatedCode) {
-    console.error(`❌ [${new Date().toISOString()}] No code generated`);
-    console.error(`   Total time: ${totalTime}ms`);
+  // Fallback 1: If streaming result was empty/whitespace, try non-streaming chat
+  if (!generatedCode || generatedCode.trim().length === 0) {
+    await logger.error(`❌ [${new Date().toISOString()}] Empty streamed response, attempting non-streaming chat fallback`);
+    try {
+      const nonStream = await ollama.chat({
+        model: "gpt-oss:20b",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        options: { temperature: 0.1, num_predict: 2048 },
+        keep_alive: "10m",
+      });
+      generatedCode = (nonStream?.message?.content || "").trim();
+      await logger.log(`🧰 Non-stream chat fallback length: ${generatedCode.length}`);
+    } catch (e) {
+      await logger.error(`❌ Non-stream chat fallback failed: ${(e as Error).message}`);
+    }
+  }
+
+  // Fallback 2: If still empty, attempt a plain generate with combined prompt
+  if (!generatedCode || generatedCode.trim().length === 0) {
+    try {
+      await logger.log(`🧪 Trying plain generate fallback`);
+      const combined = `${systemPrompt}\n\n${userPrompt}`;
+      // @ts-ignore - generate is available on Ollama client in many versions
+      const genResp = await (ollama as any).generate?.({ model: "gpt-oss:20b", prompt: combined, options: { temperature: 0.1, num_predict: 2048 } });
+      const content = genResp?.response || genResp?.message?.content || "";
+      generatedCode = (content as string).trim();
+      await logger.log(`🧰 Plain generate fallback length: ${generatedCode.length}`);
+    } catch (e) {
+      await logger.error(`❌ Plain generate fallback failed: ${(e as Error).message}`);
+    }
+  }
+
+  if (!generatedCode || generatedCode.trim().length === 0) {
+    await logger.error(`❌ [${new Date().toISOString()}] No code generated`);
+    await logger.error(`Total time: ${totalTime}ms`);
     throw new Error("No parser code generated by AI");
   }
 
-  console.log(`🎉 [${new Date().toISOString()}] Parser code generation completed successfully`);
-  console.log(`   Generated code length: ${generatedCode.length} characters`);
-  console.log(`   Total generation time: ${totalTime}ms`);
-  console.log(`   Average time per attempt: ${Math.round(totalTime / (retryCount + 1))}ms`);
+  await logger.log(`🎉 [${new Date().toISOString()}] Parser code generation completed successfully`);
+  await logger.log(`Generated code length: ${generatedCode.length} characters`);
+  await logger.log(`Total generation time: ${totalTime}ms`);
+  await logger.log(`Average time per attempt: ${Math.round(totalTime / (retryCount + 1))}ms`);
 
   return generatedCode;
 }
@@ -220,16 +180,36 @@ Generate ONLY the function code in ${language}. No explanations, no markdown for
 export const maxDuration = 600; // 10 minutes in seconds
 
 export async function POST(request: NextRequest) {
+  const requestId = uuidv4();
   const requestStartTime = Date.now();
-  const requestId = Math.random().toString(36).substring(7);
+  let currentStep = 1;
+  let processingId: string | null = null;
+  let preProcessingLogBuffer = "";
 
-  console.log(`\n🌟 [${new Date().toISOString()}] =====================================`);
-  console.log(`🌟 [${new Date().toISOString()}] NEW PARSER PROCESSING REQUEST`);
-  console.log(`🌟 [${new Date().toISOString()}] Request ID: ${requestId}`);
-  console.log(`🌟 [${new Date().toISOString()}] =====================================\n`);
+  const bufferLog = (message: string) => {
+    console.log(message);
+    preProcessingLogBuffer += (preProcessingLogBuffer ? "\n" : "") + message;
+  };
+
+  const makeLiveLogger = () => ({
+    setStep: (step: number) => { currentStep = step; },
+    log: async (message: string) => {
+      console.log(message);
+      if (processingId) {
+        await convex.mutation(api.procedures.appendProcessingLog, { processingId: processingId as any, step: currentStep, message });
+      }
+    },
+    error: async (message: string) => {
+      console.error(message);
+      if (processingId) {
+        await convex.mutation(api.procedures.appendProcessingLog, { processingId: processingId as any, step: currentStep, message });
+      }
+    }
+  } as ProcessLogger);
+  let logger: ProcessLogger | null = null;
 
   try {
-    console.log(`📥 [${new Date().toISOString()}] Parsing request body...`);
+    bufferLog(`📥 [${new Date().toISOString()}] Parsing request body...`);
     const { parserId } = await request.json();
 
     if (!parserId) {
@@ -240,149 +220,164 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(`🔄 [${new Date().toISOString()}] Processing individual parser: ${parserId}`);
+    bufferLog(`🪪 Request ID: ${requestId}`);
+    bufferLog(`Step 1: Validated request and parserId`);
+    bufferLog(`🔄 Processing individual parser: ${parserId}`);
 
-    // Get the specific parser
-    console.log(`🔍 [${new Date().toISOString()}] Fetching parser from database...`);
-    const buildingParsersStartTime = Date.now();
-    const buildingParsers = await convex.query(api.procedures.getBuildingParsers);
-    const dbQueryTime = Date.now() - buildingParsersStartTime;
-
-    console.log(`📊 [${new Date().toISOString()}] Database query completed`);
-    console.log(`   Query time: ${dbQueryTime}ms`);
-    console.log(`   Total building parsers found: ${buildingParsers.length}`);
-
-    const parser = buildingParsers.find((p: any) => p._id === parserId);
+    // Get the specific parser (allow idle or building)
+    bufferLog(`Step 2: Fetching parser from database...`);
+    const dbStart = Date.now();
+    const parser = await convex.query(api.procedures.getParserByIdPublic, { parserId });
+    const dbQueryTime = Date.now() - dbStart;
 
     if (!parser) {
       console.error(`❌ [${new Date().toISOString()}] Parser not found`);
-      console.error(`   Requested ID: ${parserId}`);
-      console.error(`   Available building parsers: ${buildingParsers.map((p: any) => p._id).join(', ')}`);
+      console.error(`Requested ID: ${parserId}`);
       return NextResponse.json(
         { error: "Parser not found or not in building state" },
         { status: 404 }
       );
     }
 
-    console.log(`✅ [${new Date().toISOString()}] Parser found successfully`);
-    console.log(`   Parser name: ${parser.name}`);
-    console.log(`   Parser UUID: ${parser.uuid}`);
-    console.log(`   Parser state: ${parser.state}`);
-    console.log(`   Platform: ${parser.platform || 'unknown'}`);
-    console.log(`   Event: ${parser.event || 'webhook'}`);
-    console.log(`   Payload size: ${parser.originalPayload ? JSON.stringify(parser.originalPayload).length : 0} characters`);
+    // Create processing row now that we have a parser ID
+    const createdProcessingId = await convex.mutation(api.procedures.startParserProcessing, {
+      parserId: parser._id,
+      requestId,
+      initialStep: currentStep,
+      initialLogs: preProcessingLogBuffer,
+    });
+    processingId = createdProcessingId as any;
+    logger = makeLiveLogger();
+
+    await logger.log(`✅ Parser found successfully (db: ${dbQueryTime}ms)`);
+    await logger.log(`Parser UUID: ${parser.uuid}`);
+    await logger.log(`Parser state: ${parser.state}`);
+    await logger.log(`Event: ${parser.event || 'webhook'}`);
 
     try {
       const processingStartTime = Date.now();
-      console.log(`\n🔄 [${new Date().toISOString()}] STARTING PARSER PROCESSING`);
-      console.log(`   Parser: ${parser.name} (${parser.uuid})`);
+      logger.setStep(3);
+      await logger.log(`\n🔄 [${new Date().toISOString()}] STARTING PARSER PROCESSING`);
+      await logger.log(`Parser: ${parser.uuid}`);
 
-      // Update parser status to indicate code generation is starting
-      console.log(`💾 [${new Date().toISOString()}] Updating parser status in database...`);
+      // Mark parser as building and add placeholder code
+      await logger.log(`💾 Marking parser as building...`);
       const statusUpdateStartTime = Date.now();
+      await convex.mutation(api.procedures.startParserBuild, { parserId: parser._id });
       await convex.mutation(api.procedures.updateParserCode, {
         parserId: parser._id,
         code: "// Generating parser code with AI...",
       });
       const statusUpdateTime = Date.now() - statusUpdateStartTime;
-      console.log(`✅ [${new Date().toISOString()}] Status update completed in ${statusUpdateTime}ms`);
+      await logger.log(`✅ Status update completed in ${statusUpdateTime}ms`);
 
       // Generate parser code using Ollama
-      console.log(`\n🤖 [${new Date().toISOString()}] STARTING AI CODE GENERATION`);
+      await logger.log(`\n🤖 STARTING AI CODE GENERATION`);
       const codeGenStartTime = Date.now();
+      // Parse original payload for generation/execution (fallback to raw string if invalid JSON)
+      let originalPayload: any;
+      try {
+        originalPayload = JSON.parse(parser.payload);
+      } catch (e) {
+        await logger.log(`⚠️  Invalid JSON in stored payload, using raw string for generation/execution`);
+        originalPayload = parser.payload;
+      }
       const generatedCode = await generateParserCode(
-        parser.platform || "unknown",
-        parser.event || "webhook",
-        parser.originalPayload
+        parser.event,
+        originalPayload,
+        logger!
       );
       const codeGenTime = Date.now() - codeGenStartTime;
-      console.log(`🎉 [${new Date().toISOString()}] AI code generation completed in ${codeGenTime}ms`);
+      await logger.log(`🎉 AI code generation completed in ${codeGenTime}ms`);
 
-      console.log(`\n⚙️  [${new Date().toISOString()}] STARTING PARSER EXECUTION`);
+      logger.setStep(5);
+      await logger.log(`\n⚙️  STARTING PARSER EXECUTION`);
 
       // Execute the parser with the original payload
-      console.log(`🔧 [${new Date().toISOString()}] Creating parser function...`);
+      await logger.log(`🔧 Creating parser function...`);
       const functionCreateStartTime = Date.now();
       const parseFunction = new Function(
         "payload",
         `${generatedCode}\nreturn exec(payload);`
       );
       const functionCreateTime = Date.now() - functionCreateStartTime;
-      console.log(`✅ [${new Date().toISOString()}] Parser function created in ${functionCreateTime}ms`);
+      await logger.log(`✅ Parser function created in ${functionCreateTime}ms`);
 
-      console.log(`🚀 [${new Date().toISOString()}] Executing parser function...`);
+      logger.setStep(6);
+      await logger.log(`🚀 Executing parser function...`);
       const executionStartTime = Date.now();
-      const result = parseFunction(parser.originalPayload);
+      const result = parseFunction(originalPayload);
       const executionTime = Date.now() - executionStartTime;
-      console.log(`✅ [${new Date().toISOString()}] Parser execution completed in ${executionTime}ms`);
+      await logger.log(`✅ Parser execution completed in ${executionTime}ms`);
 
-      console.log(`🔍 [${new Date().toISOString()}] Validating parser execution result...`);
-      console.log(`   Result type: ${typeof result}`);
-      console.log(`   Has client: ${!!(result && result.client)}`);
-      console.log(`   Has order: ${!!(result && result.order)}`);
+      logger.setStep(7);
+      await logger.log(`🔍 Validating parser execution result...`);
+      await logger.log(`Result type: ${typeof result}`);
+      await logger.log(`Has client: ${!!(result && result.client)}`);
+      await logger.log(`Has order: ${!!(result && result.order)}`);
 
       if (result && result.client && result.order) {
-        console.log(`✅ [${new Date().toISOString()}] Parser result validation passed`);
+        await logger.log(`✅ Parser result validation passed`);
 
         // Update the parser with the generated code first
-        console.log(`💾 [${new Date().toISOString()}] Saving generated code to database...`);
+        logger.setStep(8);
+        await logger.log(`💾 Saving generated code to database...`);
         const codeSaveStartTime = Date.now();
         await convex.mutation(api.procedures.updateParserCode, {
           parserId: parser._id,
           code: generatedCode,
         });
         const codeSaveTime = Date.now() - codeSaveStartTime;
-        console.log(`✅ [${new Date().toISOString()}] Code saved in ${codeSaveTime}ms`);
+        await logger.log(`✅ Code saved in ${codeSaveTime}ms`);
 
         // Process the parsed data directly since we already executed the parser
-        console.log(`\n🏗️  [${new Date().toISOString()}] STARTING FINAL PROCESSING`);
+        logger.setStep(9);
+        await logger.log(`\n🏗️  STARTING FINAL PROCESSING`);
         const finalProcessingStartTime = Date.now();
 
-        console.log(`📊 [${new Date().toISOString()}] Processing parsed data...`);
-        console.log(`   Client data: ${JSON.stringify(result.client).substring(0, 200)}...`);
-        console.log(`   Order data: ${JSON.stringify(result.order).substring(0, 200)}...`);
-        console.log(`   Has shipping: ${!!result.shipping}`);
-        console.log(`   Has order lines: ${!!result.orderLines}`);
+        await logger.log(`📊 Processing parsed data...`);
+        await logger.log(`Client data: ${JSON.stringify(result.client).substring(0, 200)}...`);
+        await logger.log(`Order data: ${JSON.stringify(result.order).substring(0, 200)}...`);
+        await logger.log(`Has shipping: ${!!result.shipping}`);
+        await logger.log(`Has order lines: ${!!result.orderLines}`);
 
-        // Store the processed data directly
-        const processResult = await convex.mutation(api.procedures.processWebhookDataPublic, {
-          clientData: result.client,
-          orderData: result.order,
-          shippingData: result.shipping,
-          orderLinesData: result.orderLines,
+        // Store the processed data directly (filter out null values)
+        await convex.mutation(api.procedures.processWebhookDataPublic, {
+          clientData: filterNullValues(result.client),
+          orderData: filterNullValues(result.order),
+          shippingData: result.shipping ? filterNullValues(result.shipping) : undefined,
+          orderLinesData: result.orderLines ? result.orderLines.map(filterNullValues) : undefined,
         });
 
         // Update parser to success state
-        const parserDir = `/parsers/${parser.uuid}`;
         await convex.mutation(api.procedures.updateParserSuccessPublic, {
           parserId: parser._id,
-          dir: parserDir,
         });
 
         const finalProcessingTime = Date.now() - finalProcessingStartTime;
-        console.log(`✅ [${new Date().toISOString()}] Final processing completed in ${finalProcessingTime}ms`);
+        await logger.log(`✅ Final processing completed in ${finalProcessingTime}ms`);
 
         const totalProcessingTime = Date.now() - processingStartTime;
         const totalRequestTime = Date.now() - requestStartTime;
 
-        console.log(`\n🎉 [${new Date().toISOString()}] PARSER PROCESSING COMPLETED SUCCESSFULLY`);
-        console.log(`   Parser: ${parser.name}`);
-        console.log(`   UUID: ${parser.uuid}`);
-        console.log(`   Processing time: ${totalProcessingTime}ms`);
-        console.log(`   Total request time: ${totalRequestTime}ms`);
-        console.log(`   Steps breakdown:`);
-        console.log(`     - DB query: ${dbQueryTime}ms`);
-        console.log(`     - Status update: ${statusUpdateTime}ms`);
-        console.log(`     - AI generation: ${codeGenTime}ms`);
-        console.log(`     - Function creation: ${functionCreateTime}ms`);
-        console.log(`     - Execution: ${executionTime}ms`);
-        console.log(`     - Code save: ${codeSaveTime}ms`);
-        console.log(`     - Final processing: ${finalProcessingTime}ms`);
+        await logger.log(`\n🎉 PARSER PROCESSING COMPLETED SUCCESSFULLY`);
+        await logger.log(`Parser: ${parser.uuid}`);
+        await logger.log(`Processing time: ${totalProcessingTime}ms`);
+        await logger.log(`Total request time: ${totalRequestTime}ms`);
+        await logger.log(`Steps breakdown:`);
+        await logger.log(`- DB query: ${dbQueryTime}ms`);
+        await logger.log(`- Status update: ${statusUpdateTime}ms`);
+        await logger.log(`- AI generation: ${codeGenTime}ms`);
+        await logger.log(`- Function creation: ${functionCreateTime}ms`);
+        await logger.log(`- Execution: ${executionTime}ms`);
+        await logger.log(`- Code save: ${codeSaveTime}ms`);
+        await logger.log(`- Final processing: ${finalProcessingTime}ms`);
+
+        await convex.mutation(api.procedures.markProcessingSuccess, { processingId: processingId as any });
 
         return NextResponse.json({
           message: "Parser processed successfully",
           parserId: parser._id,
-          parserName: parser.name,
           parserUuid: parser.uuid,
           status: "success",
           timing: {
@@ -393,41 +388,43 @@ export async function POST(request: NextRequest) {
           }
         });
       } else {
-        console.error(`❌ [${new Date().toISOString()}] Parser result validation failed`);
-        console.error(`   Expected: result.client and result.order`);
-        console.error(`   Got: ${JSON.stringify(result, null, 2)}`);
+        await logger.error(`❌ Parser result validation failed`);
+        await logger.error(`Expected: result.client and result.order`);
+        await logger.error(`Got: ${JSON.stringify(result, null, 2)}`);
         throw new Error("Parser execution failed - invalid result structure");
       }
     } catch (error) {
       const totalRequestTime = Date.now() - requestStartTime;
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
 
-      console.error(`\n💥 [${new Date().toISOString()}] PARSER PROCESSING FAILED`);
-      console.error(`   Parser: ${parser.name} (${parser.uuid})`);
-      console.error(`   Error type: ${error instanceof Error ? error.constructor.name : 'Unknown'}`);
-      console.error(`   Error message: ${errorMessage}`);
-      console.error(`   Total time before failure: ${totalRequestTime}ms`);
-      console.error(`   Stack trace:`, error instanceof Error ? error.stack : 'No stack trace');
+      await logger?.error(`\n💥 PARSER PROCESSING FAILED`);
+      await logger?.error(`Parser: ${parser.uuid}`);
+      await logger?.error(`Error type: ${error instanceof Error ? error.constructor.name : 'Unknown'}`);
+      await logger?.error(`Error message: ${errorMessage}`);
+      await logger?.error(`Total time before failure: ${totalRequestTime}ms`);
+      await logger?.error(`Stack trace: ${(error instanceof Error ? error.stack : 'No stack trace') as string}`);
 
       // Update parser to failed state
-      console.log(`💾 [${new Date().toISOString()}] Updating parser to failed state...`);
+      await logger?.log(`💾 Updating parser to failed state...`);
       try {
         const updateStartTime = Date.now();
         await convex.mutation(api.procedures.updateParserFailedPublic, {
           parserId: parser._id,
-          error: errorMessage,
         });
         const updateTime = Date.now() - updateStartTime;
-        console.log(`✅ [${new Date().toISOString()}] Parser state updated to failed in ${updateTime}ms`);
+        await logger?.log(`✅ Parser state updated to failed in ${updateTime}ms`);
       } catch (updateError) {
-        console.error(`❌ [${new Date().toISOString()}] Failed to update parser state:`, updateError);
+        await logger?.error(`❌ Failed to update parser state: ${(updateError as Error)?.message}`);
       }
 
-      console.log(`\n📤 [${new Date().toISOString()}] Returning error response`);
+      if (processingId) {
+        await convex.mutation(api.procedures.markProcessingFailed, { processingId: processingId as any, error: errorMessage });
+      }
+
+      await logger?.log(`\n📤 Returning error response`);
       return NextResponse.json({
         message: "Parser processing failed",
         parserId: parser._id,
-        parserName: parser.name,
         parserUuid: parser.uuid,
         status: "failed",
         error: errorMessage,
@@ -443,11 +440,11 @@ export async function POST(request: NextRequest) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
 
     console.error(`\n💥💥 [${new Date().toISOString()}] CRITICAL REQUEST FAILURE`);
-    console.error(`   Request ID: ${requestId}`);
-    console.error(`   Error type: ${error instanceof Error ? error.constructor.name : 'Unknown'}`);
-    console.error(`   Error message: ${errorMessage}`);
-    console.error(`   Total request time: ${totalRequestTime}ms`);
-    console.error(`   Stack trace:`, error instanceof Error ? error.stack : 'No stack trace');
+    console.error(`Request ID: ${requestId}`);
+    console.error(`Error type: ${error instanceof Error ? error.constructor.name : 'Unknown'}`);
+    console.error(`Error message: ${errorMessage}`);
+    console.error(`Total request time: ${totalRequestTime}ms`);
+    console.error(`Stack trace:`, error instanceof Error ? error.stack : 'No stack trace');
 
     return NextResponse.json(
       {
@@ -462,4 +459,64 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+
+function generateFingerprint(payload: any): string {
+  return Object
+    .keys(payload || {})
+    .sort()
+    .join('|');
+}
+
+function filterNullValues(obj: any): any {
+  if (obj === null || obj === undefined) return undefined;
+  if (typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(filterNullValues);
+
+  const filtered: any = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== null) {
+      filtered[key] = filterNullValues(value);
+    }
+  }
+  return filtered;
+}
+
+function simplifyPayload(payload: any, {
+  arraySampleSize = 1,
+  maxStringLength = 100,
+}: {
+  arraySampleSize?: number;
+  maxStringLength?: number;
+} = {}): any {
+  if (Array.isArray(payload)) {
+    // Keep only the first `arraySampleSize` items
+    const sampled = payload.slice(0, arraySampleSize).map(item =>
+      simplifyPayload(item, { arraySampleSize, maxStringLength })
+    );
+    if (payload.length > arraySampleSize) {
+      sampled.push(`… ${payload.length - arraySampleSize} more items …`);
+    }
+    return sampled;
+  }
+  if (payload !== null && typeof payload === 'object') {
+    const result = {};
+    for (const [key, val] of Object.entries(payload)) {
+      (result as any)[key] = simplifyPayload(val, {
+        arraySampleSize,
+        maxStringLength,
+      });
+    }
+    return result;
+  }
+  if (typeof payload === 'string') {
+    // Truncate long strings
+    if (payload.length > maxStringLength) {
+      return payload.slice(0, maxStringLength) + '…';
+    }
+    return payload;
+  }
+  // numbers, booleans, null
+  return payload;
 }

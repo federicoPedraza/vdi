@@ -1,86 +1,42 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import OrdersTable from "@/components/OrdersTable";
-import ContactsTable from "@/components/ContactsTable";
-import ShippingsTable from "@/components/ShippingsTable";
+import GraphExplorer from "@/components/GraphExplorer";
 import ParsersTable from "@/components/ParsersTable";
-import WebhooksTable from "@/components/WebhooksTable";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import Playground from "@/components/Playground";
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState("orders");
-
-  useEffect(() => {
-    // Check for tab parameter in URL
-    const urlParams = new URLSearchParams(window.location.search);
-    const tabParam = urlParams.get('tab');
-    if (tabParam && ['orders', 'contacts', 'shippings', 'webhooks', 'parsers'].includes(tabParam)) {
-      setActiveTab(tabParam);
-    }
-  }, []);
   return (
-    <>
-      <header className="sticky top-0 z-10 bg-white p-4 border-b-2 border-slate-200 flex flex-row justify-between items-center">
-        Management Dashboard
-      </header>
-      <main className="min-h-screen bg-white">
-        <div className="container mx-auto py-8">
-          <h1 className="text-4xl font-bold text-center mb-8">
-            Management Dashboard
-          </h1>
+    <main className="min-h-screen bg-white">
+      <section className="px-6 py-10 md:py-16">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8 md:gap-10 items-center">
+          <div className="flex flex-col gap-3 md:gap-4 lg:col-span-1">
+            <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight">
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 via-fuchsia-500 to-pink-500 gradient-animate drop-shadow">
+                Vibe Driven Integration
+              </span>
+            </h1>
+            <p className="text-zinc-600 text-base md:text-lg">
+              AI-powered system that generates intelligent parsers for any data format, creating seamless integrations and visualizing complex relationships in real-time.
+            </p>
+          </div>
 
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-5">
-              <TabsTrigger value="orders">Orders</TabsTrigger>
-              <TabsTrigger value="contacts">Contacts</TabsTrigger>
-              <TabsTrigger value="shippings">Shippings</TabsTrigger>
-              <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
-              <TabsTrigger value="parsers">Parsers</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="orders" className="mt-6">
-              <div className="text-center mb-4">
-                <h2 className="text-2xl font-semibold">Orders Management</h2>
-                <p className="text-muted-foreground">Manage and track your orders</p>
-              </div>
-              <OrdersTable />
-            </TabsContent>
-
-            <TabsContent value="contacts" className="mt-6">
-              <div className="text-center mb-4">
-                <h2 className="text-2xl font-semibold">Contacts Management</h2>
-                <p className="text-muted-foreground">Manage your customer contacts</p>
-              </div>
-              <ContactsTable />
-            </TabsContent>
-
-            <TabsContent value="shippings" className="mt-6">
-              <div className="text-center mb-4">
-                <h2 className="text-2xl font-semibold">Shippings Management</h2>
-                <p className="text-muted-foreground">Track and manage shipments</p>
-              </div>
-              <ShippingsTable />
-            </TabsContent>
-
-            <TabsContent value="webhooks" className="mt-6">
-              <div className="text-center mb-4">
-                <h2 className="text-2xl font-semibold">Webhooks Management</h2>
-                <p className="text-muted-foreground">Configure webhook subscriptions for external services</p>
-              </div>
-              <WebhooksTable />
-            </TabsContent>
-
-            <TabsContent value="parsers" className="mt-6">
-              <div className="text-center mb-4">
-                <h2 className="text-2xl font-semibold">Parsers Management</h2>
-                <p className="text-muted-foreground">Manage and track your parsers</p>
-              </div>
-              <ParsersTable />
-            </TabsContent>
-          </Tabs>
+          <div className="overflow-hidden lg:col-span-2" style={{ height: "66vh" }}>
+            <GraphExplorer />
+          </div>
         </div>
-      </main>
-    </>
+      </section>
+
+      <section className="px-6 pb-10">
+        <div className="max-w-7xl mx-auto">
+          <ParsersTable />
+        </div>
+      </section>
+
+      <section className="px-6 pb-16">
+        <div className="max-w-7xl mx-auto">
+          <Playground />
+        </div>
+      </section>
+    </main>
   );
 }

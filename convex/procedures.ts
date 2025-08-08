@@ -787,20 +787,11 @@ export const getAllParsers = query({
     _id: v.id("parsers"),
     _creationTime: v.number(),
     uuid: v.string(),
-    name: v.string(),
     code: v.optional(v.string()),
     language: v.string(),
-    payloadSchema: v.optional(v.any()),
-    platform: v.optional(v.string()),
-    event: v.optional(v.string()),
-    isActive: v.boolean(),
-    lastUsed: v.optional(v.number()),
-    successCount: v.number(),
-    errorCount: v.number(),
-    state: v.union(v.literal("building"), v.literal("success"), v.literal("failed")),
-    dir: v.optional(v.string()),
-    originalPayload: v.optional(v.any()),
-    error: v.optional(v.string()),
+    event: v.string(),
+    fingerprint: v.string(),
+    state: v.union(v.literal("idle"), v.literal("building"), v.literal("success"), v.literal("failed")),
   })),
   handler: async (ctx, args) => {
     const parsers = await ctx.db.query("parsers").order("desc").collect();
@@ -808,21 +799,36 @@ export const getAllParsers = query({
       _id: parser._id,
       _creationTime: parser._creationTime,
       uuid: parser.uuid,
-      name: parser.name,
       code: parser.code,
       language: parser.language,
-      payloadSchema: parser.payloadSchema,
-      platform: parser.platform,
       event: parser.event,
-      isActive: parser.isActive,
-      lastUsed: parser.lastUsed,
-      successCount: parser.successCount,
-      errorCount: parser.errorCount,
-      state: parser.state || "success" as const, // Default to success for backward compatibility
-      dir: parser.dir,
-      originalPayload: parser.originalPayload,
-      error: parser.error,
+      fingerprint: parser.fingerprint,
+      state: (parser.state as any) || "success" as const,
     }));
+  },
+});
+
+/**
+ * Get parser by ID (public)
+ */
+export const getParserByIdPublic = query({
+  args: { parserId: v.id("parsers") },
+  returns: v.union(
+    v.object({
+      _id: v.id("parsers"),
+      _creationTime: v.number(),
+      uuid: v.string(),
+      language: v.string(),
+      code: v.optional(v.string()),
+      event: v.string(),
+      fingerprint: v.string(),
+      payload: v.string(),
+      state: v.union(v.literal("idle"), v.literal("building"), v.literal("success"), v.literal("failed")),
+    }),
+    v.null()
+  ),
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.parserId);
   },
 });
 
@@ -838,20 +844,12 @@ export const getParserByUuid = query({
       _id: v.id("parsers"),
       _creationTime: v.number(),
       uuid: v.string(),
-      name: v.string(),
       language: v.string(),
+      fingerprint: v.string(),
       code: v.optional(v.string()),
-      payloadSchema: v.optional(v.any()),
-      platform: v.optional(v.string()),
-      event: v.optional(v.string()),
-      isActive: v.boolean(),
-      lastUsed: v.optional(v.number()),
-      successCount: v.number(),
-      errorCount: v.number(),
-      state: v.union(v.literal("building"), v.literal("success"), v.literal("failed")),
-      dir: v.optional(v.string()),
-      originalPayload: v.optional(v.any()),
-      error: v.optional(v.string()),
+      event: v.string(),
+      payload: v.string(),
+      state: v.union(v.literal("idle"), v.literal("building"), v.literal("success"), v.literal("failed")),
     }),
     v.null()
   ),
@@ -875,20 +873,12 @@ export const getParserByUuidInternal = internalQuery({
       _id: v.id("parsers"),
       _creationTime: v.number(),
       uuid: v.string(),
-      name: v.string(),
       language: v.string(),
+      fingerprint: v.string(),
       code: v.optional(v.string()),
-      payloadSchema: v.optional(v.any()),
-      platform: v.optional(v.string()),
-      event: v.optional(v.string()),
-      isActive: v.boolean(),
-      lastUsed: v.optional(v.number()),
-      successCount: v.number(),
-      errorCount: v.number(),
-      state: v.union(v.literal("building"), v.literal("success"), v.literal("failed")),
-      dir: v.optional(v.string()),
-      originalPayload: v.optional(v.any()),
-      error: v.optional(v.string()),
+      event: v.string(),
+      payload: v.string(),
+      state: v.union(v.literal("idle"), v.literal("building"), v.literal("success"), v.literal("failed")),
     }),
     v.null()
   ),
@@ -905,7 +895,6 @@ export const getParserByUuidInternal = internalQuery({
  */
 export const findParsersForEvent = internalQuery({
   args: {
-    platform: v.string(),
     event: v.string(),
   },
   returns: v.array(
@@ -913,50 +902,19 @@ export const findParsersForEvent = internalQuery({
       _id: v.id("parsers"),
       _creationTime: v.number(),
       uuid: v.string(),
-      name: v.string(),
       language: v.string(),
+      fingerprint: v.string(),
+      payload: v.string(),
       code: v.optional(v.string()),
-      payloadSchema: v.optional(v.any()),
-      platform: v.optional(v.string()),
-      event: v.optional(v.string()),
-      isActive: v.boolean(),
-      lastUsed: v.optional(v.number()),
-      successCount: v.number(),
-      errorCount: v.number(),
-      state: v.union(v.literal("building"), v.literal("success"), v.literal("failed")),
-      dir: v.optional(v.string()),
-      originalPayload: v.optional(v.any()),
-      error: v.optional(v.string()),
+      event: v.string(),
+      state: v.union(v.literal("idle"), v.literal("building"), v.literal("success"), v.literal("failed")),
     })
   ),
   handler: async (ctx, args) => {
     return await ctx.db
       .query("parsers")
-      .withIndex("by_platform_event", (q) =>
-        q.eq("platform", args.platform).eq("event", args.event)
-      )
-      .filter((q) => q.eq(q.field("isActive"), true))
+      .withIndex("by_event", (q) => q.eq("event", args.event))
       .collect();
-  },
-});
-
-/**
- * Toggle parser active status
- */
-export const toggleParserStatus = mutation({
-  args: {
-    parserId: v.id("parsers"),
-  },
-  returns: v.null(),
-  handler: async (ctx, args) => {
-    const parser = await ctx.db.get(args.parserId);
-    if (!parser) throw new Error("Parser not found");
-
-    await ctx.db.patch(args.parserId, {
-      isActive: !parser.isActive,
-    });
-
-    return null;
   },
 });
 
@@ -980,56 +938,23 @@ export const deleteParser = mutation({
 export const storeParser = internalMutation({
   args: {
     uuid: v.string(),
-    name: v.string(),
     language: v.string(),
     code: v.string(),
-    payloadSchema: v.any(),
-    platform: v.optional(v.string()),
-    event: v.optional(v.string()),
+    payload: v.string(),
+    event: v.string(),
+    fingerprint: v.string(),
   },
   returns: v.id("parsers"),
   handler: async (ctx, args) => {
     return await ctx.db.insert("parsers", {
       uuid: args.uuid,
-      name: args.name,
       language: args.language,
-      code: args.code,
-      payloadSchema: args.payloadSchema,
-      platform: args.platform,
       event: args.event,
-      isActive: true,
-      successCount: 0,
-      errorCount: 0,
-      state: "success" as const,
+      fingerprint: args.fingerprint,
+      payload: args.payload,
+      code: args.code,
+      state: "idle" as const,
     });
-  },
-});
-
-/**
- * Update parser statistics after execution (internal)
- */
-export const updateParserStats = internalMutation({
-  args: {
-    parserId: v.id("parsers"),
-    success: v.boolean(),
-  },
-  returns: v.null(),
-  handler: async (ctx, args) => {
-    const parser = await ctx.db.get(args.parserId);
-    if (!parser) return null;
-
-    const updates: any = {
-      lastUsed: Date.now(),
-    };
-
-    if (args.success) {
-      updates.successCount = parser.successCount + 1;
-    } else {
-      updates.errorCount = parser.errorCount + 1;
-    }
-
-    await ctx.db.patch(args.parserId, updates);
-    return null;
   },
 });
 
@@ -1040,11 +965,10 @@ export const processWebhookData = internalMutation({
   args: {
     // Parser data
     parserUuid: v.string(),
-    parserName: v.string(),
     parserCode: v.string(),
-    payloadSchema: v.any(),
-    platform: v.string(),
+    payload: v.string(),
     event: v.string(),
+    fingerprint: v.string(),
     // Parsed data
     clientData: v.any(),
     orderData: v.any(),
@@ -1060,16 +984,12 @@ export const processWebhookData = internalMutation({
     // Store parser
     const parserId: Id<"parsers"> = await ctx.db.insert("parsers", {
       uuid: args.parserUuid,
-      name: args.parserName,
       language: "javascript",
       code: args.parserCode,
-      payloadSchema: args.payloadSchema,
-      platform: args.platform,
+      payload: args.payload,
       event: args.event,
-      isActive: true,
-      successCount: 0,
-      errorCount: 0,
-      state: "success" as const,
+      fingerprint: args.fingerprint,
+      state: "idle" as const,
     });
 
     // Store client
@@ -1109,29 +1029,24 @@ export const processWebhookData = internalMutation({
 export const storeParserBuildingPublic = mutation({
   args: {
     uuid: v.string(),
-    name: v.string(),
     language: v.string(),
     code: v.string(),
-    payloadSchema: v.any(),
-    platform: v.optional(v.string()),
-    event: v.optional(v.string()),
-    originalPayload: v.any(), // Store the original payload for processing later
+    payload: v.string(),
+    event: v.string(),
+    fingerprint: v.string(),
   },
   returns: v.id("parsers"),
   handler: async (ctx, args) => {
+    // Generate fingerprint from payload schema
+
     return await ctx.db.insert("parsers", {
       uuid: args.uuid,
-      name: args.name,
       language: args.language,
       code: args.code,
-      payloadSchema: args.payloadSchema,
-      platform: args.platform,
+      payload: args.payload,
       event: args.event,
-      isActive: true,
-      successCount: 0,
-      errorCount: 0,
-      state: "building" as const,
-      originalPayload: args.originalPayload, // Store payload for later processing
+      fingerprint: args.fingerprint,
+      state: "idle" as const,
     });
   },
 });
@@ -1146,20 +1061,12 @@ export const getBuildingParsers = query({
       _id: v.id("parsers"),
       _creationTime: v.number(),
       uuid: v.string(),
-      name: v.string(),
       language: v.string(),
+      fingerprint: v.string(),
+      payload: v.string(),
       code: v.optional(v.string()),
-      payloadSchema: v.optional(v.any()),
-      platform: v.optional(v.string()),
       event: v.optional(v.string()),
-      isActive: v.boolean(),
-      lastUsed: v.optional(v.number()),
-      successCount: v.number(),
-      errorCount: v.number(),
-      state: v.union(v.literal("building"), v.literal("success"), v.literal("failed")),
-      dir: v.optional(v.string()),
-      originalPayload: v.optional(v.any()),
-      error: v.optional(v.string()),
+      state: v.union(v.literal("idle"), v.literal("building"), v.literal("success"), v.literal("failed")),
     })
   ),
   handler: async (ctx, args) => {
@@ -1171,18 +1078,59 @@ export const getBuildingParsers = query({
 });
 
 /**
+ * Get parsers pending build (idle or building)
+ */
+export const getPendingParsers = query({
+  args: {},
+  returns: v.array(
+    v.object({
+      _id: v.id("parsers"),
+      _creationTime: v.number(),
+      uuid: v.string(),
+      language: v.string(),
+      fingerprint: v.string(),
+      payload: v.string(),
+      code: v.optional(v.string()),
+      event: v.optional(v.string()),
+      state: v.union(v.literal("idle"), v.literal("building"), v.literal("success"), v.literal("failed")),
+    })
+  ),
+  handler: async (ctx, args) => {
+    const idle = await ctx.db
+      .query("parsers")
+      .withIndex("by_state", (q) => q.eq("state", "idle"))
+      .collect();
+    const building = await ctx.db
+      .query("parsers")
+      .withIndex("by_state", (q) => q.eq("state", "building"))
+      .collect();
+    return [...idle, ...building];
+  },
+});
+
+/**
+ * Mark a parser as building when a build starts
+ */
+export const startParserBuild = mutation({
+  args: { parserId: v.id("parsers") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.parserId, { state: "building" as const });
+    return null;
+  },
+});
+
+/**
  * Update parser state to success with directory
  */
 export const updateParserSuccess = internalMutation({
   args: {
     parserId: v.id("parsers"),
-    dir: v.string(),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
     await ctx.db.patch(args.parserId, {
       state: "success" as const,
-      dir: args.dir,
     });
     return null;
   },
@@ -1194,13 +1142,11 @@ export const updateParserSuccess = internalMutation({
 export const updateParserSuccessPublic = mutation({
   args: {
     parserId: v.id("parsers"),
-    dir: v.string(),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
     await ctx.db.patch(args.parserId, {
       state: "success" as const,
-      dir: args.dir,
     });
     return null;
   },
@@ -1212,13 +1158,11 @@ export const updateParserSuccessPublic = mutation({
 export const updateParserFailed = internalMutation({
   args: {
     parserId: v.id("parsers"),
-    error: v.optional(v.string()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
     await ctx.db.patch(args.parserId, {
       state: "failed" as const,
-      error: args.error,
     });
     return null;
   },
@@ -1230,13 +1174,11 @@ export const updateParserFailed = internalMutation({
 export const updateParserFailedPublic = mutation({
   args: {
     parserId: v.id("parsers"),
-    error: v.optional(v.string()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
     await ctx.db.patch(args.parserId, {
       state: "failed" as const,
-      error: args.error,
     });
     return null;
   },
@@ -1278,12 +1220,10 @@ export const resetFailedParser = mutation({
       throw new Error("Only failed parsers can be reset");
     }
 
-    // Reset parser to building state and clear error
+    // Reset parser to idle state and clear error
     await ctx.db.patch(args.parserId, {
-      state: "building" as const,
-      error: undefined,
-      code: undefined, // Clear any failed code - will be regenerated during build
-      dir: undefined, // Clear any failed directory
+      state: "idle" as const,
+      code: undefined,
     });
 
     return null;
@@ -1354,7 +1294,7 @@ export const processBuildingParser = action({
       parserId: args.parserId,
     });
 
-    if (!parser || parser.state !== "building") {
+    if (!parser || (parser.state !== "building" && parser.state !== "idle")) {
       throw new Error("Parser not found or not in building state");
     }
 
@@ -1365,28 +1305,24 @@ export const processBuildingParser = action({
         `${parser.code || ""}\nreturn exec(payload);`
       );
 
-      const result = parseFunction(parser.originalPayload);
+      const result = parseFunction(parser.payload);
 
       if (result && result.client && result.order) {
         // Process the parsed data
         const processResult = await ctx.runMutation(internal.procedures.processWebhookData, {
           parserUuid: parser.uuid,
-          parserName: parser.name,
           parserCode: parser.code || "",
-          payloadSchema: parser.payloadSchema,
-          platform: parser.platform || "unknown",
           event: parser.event || "webhook",
+          payload: parser.payload,
+          fingerprint: parser.fingerprint,
           clientData: result.client,
           orderData: result.order,
           shippingData: result.shipping,
           orderLinesData: result.orderLines,
         });
 
-        // Update parser to success state with directory
-        const parserDir = `/parsers/${parser.uuid}`;
         await ctx.runMutation(internal.procedures.updateParserSuccess, {
           parserId: args.parserId,
-          dir: parserDir,
         });
 
         console.log(`✅ Parser ${parser.uuid} processed successfully`);
@@ -1400,11 +1336,41 @@ export const processBuildingParser = action({
       // Update parser to failed state
       await ctx.runMutation(internal.procedures.updateParserFailed, {
         parserId: args.parserId,
-        error: error instanceof Error ? error.message : "Unknown error",
       });
     }
 
     return null;
+  },
+});
+
+/**
+ * Find active parsers by fingerprint for reuse
+ */
+export const getParserByFingerprint = query({
+  args: {
+    fingerprint: v.string(),
+  },
+  returns: v.union(
+    v.object({
+      _id: v.id("parsers"),
+      _creationTime: v.number(),
+      uuid: v.string(),
+      language: v.string(),
+      code: v.optional(v.string()),
+      payload: v.string(),
+      event: v.string(),
+      fingerprint: v.string(),
+      state: v.union(v.literal("idle"), v.literal("building"), v.literal("success"), v.literal("failed")),
+    }),
+    v.null()
+  ),
+  handler: async (ctx, args) => {
+    const parser = await ctx.db
+      .query("parsers")
+      .withIndex("by_fingerprint", (q) => q.eq("fingerprint", args.fingerprint))
+      .filter((q) => q.eq(q.field("state"), "success"))
+      .first();
+    return parser;
   },
 });
 
@@ -1420,24 +1386,131 @@ export const getParserById = internalQuery({
       _id: v.id("parsers"),
       _creationTime: v.number(),
       uuid: v.string(),
-      name: v.string(),
       language: v.string(),
       code: v.optional(v.string()),
-      payloadSchema: v.optional(v.any()),
-      platform: v.optional(v.string()),
-      event: v.optional(v.string()),
-      isActive: v.boolean(),
-      lastUsed: v.optional(v.number()),
-      successCount: v.number(),
-      errorCount: v.number(),
-      state: v.union(v.literal("building"), v.literal("success"), v.literal("failed")),
-      dir: v.optional(v.string()),
-      error: v.optional(v.string()),
-      originalPayload: v.optional(v.any()),
+      payload: v.string(),
+      event: v.string(),
+      fingerprint: v.string(),
+      state: v.union(v.literal("idle"), v.literal("building"), v.literal("success"), v.literal("failed")),
     }),
     v.null()
   ),
   handler: async (ctx, args) => {
     return await ctx.db.get(args.parserId);
+  },
+});
+
+function generateFingerprint(payload: any): string {
+  return Object
+    .keys(payload || {})
+    .sort()
+    .join('|');
+}
+
+// ===== PARSER PROCESSING TRACKING =====
+
+export const startParserProcessing = mutation({
+  args: {
+    parserId: v.id("parsers"),
+    requestId: v.string(),
+    initialStep: v.number(),
+    initialLogs: v.optional(v.string()),
+  },
+  returns: v.id("parser_processings"),
+  handler: async (ctx, args) => {
+    const processingId = await ctx.db.insert("parser_processings", {
+      parserId: args.parserId,
+      requestId: args.requestId,
+      step: args.initialStep,
+      logs: args.initialLogs ?? "",
+      status: "running" as const,
+      startedAt: Date.now(),
+    });
+    return processingId;
+  },
+});
+
+export const appendProcessingLog = mutation({
+  args: {
+    processingId: v.id("parser_processings"),
+    step: v.number(),
+    message: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const current = await ctx.db.get(args.processingId);
+    if (!current) return null;
+    const newLogs = (current.logs || "") + (current.logs ? "\n" : "") + args.message;
+    await ctx.db.patch(args.processingId, { logs: newLogs, step: args.step });
+    return null;
+  },
+});
+
+export const markProcessingSuccess = mutation({
+  args: {
+    processingId: v.id("parser_processings"),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.processingId, { status: "success" as const, finishedAt: Date.now() });
+    return null;
+  },
+});
+
+export const markProcessingFailed = mutation({
+  args: {
+    processingId: v.id("parser_processings"),
+    error: v.optional(v.string()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.processingId, { status: "failed" as const, finishedAt: Date.now(), error: args.error });
+    return null;
+  },
+});
+
+export const getProcessingsByParser = query({
+  args: { parserId: v.id("parsers") },
+  returns: v.array(v.object({
+    _id: v.id("parser_processings"),
+    _creationTime: v.number(),
+    parserId: v.id("parsers"),
+    requestId: v.string(),
+    step: v.number(),
+    logs: v.string(),
+    status: v.union(v.literal("running"), v.literal("success"), v.literal("failed")),
+    startedAt: v.number(),
+    finishedAt: v.optional(v.number()),
+    error: v.optional(v.string()),
+  })),
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("parser_processings")
+      .withIndex("by_parser", (q) => q.eq("parserId", args.parserId))
+      .order("desc")
+      .collect();
+  },
+});
+
+export const getProcessingByRequestId = query({
+  args: { requestId: v.string() },
+  returns: v.union(v.object({
+    _id: v.id("parser_processings"),
+    _creationTime: v.number(),
+    parserId: v.id("parsers"),
+    requestId: v.string(),
+    step: v.number(),
+    logs: v.string(),
+    status: v.union(v.literal("running"), v.literal("success"), v.literal("failed")),
+    startedAt: v.number(),
+    finishedAt: v.optional(v.number()),
+    error: v.optional(v.string()),
+  }), v.null()),
+  handler: async (ctx, args) => {
+    const proc = await ctx.db
+      .query("parser_processings")
+      .withIndex("by_request", (q) => q.eq("requestId", args.requestId))
+      .first();
+    return proc ?? null;
   },
 });
