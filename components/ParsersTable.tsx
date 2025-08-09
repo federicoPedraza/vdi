@@ -726,6 +726,7 @@ export default function ParsersTable() {
                                 );
                               } catch { }
                             }}
+                            disabled={!!processingById[id] || parser.state === "building"}
                           >
                             <span
                               aria-hidden
@@ -779,7 +780,7 @@ export default function ParsersTable() {
                                 setDeletingById((prev) => ({ ...prev, [id]: false }));
                               }
                             }}
-                            disabled={!!deletingById[id]}
+                            disabled={!!deletingById[id] || !!processingById[id] || parser.state === "building"}
                             aria-label="Delete parser"
                             title="Delete parser"
                           >
@@ -889,6 +890,7 @@ export default function ParsersTable() {
             event: useParserTarget.event,
             fingerprint: useParserTarget.fingerprint,
             payload: useParserTarget.payload,
+            state: useParserTarget.state,
           }}
         />
       )}

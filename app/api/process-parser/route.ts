@@ -393,6 +393,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Disallow re-processing successful parsers
+    if (parser.state === "success") {
+      try { request.signal.removeEventListener("abort", abortHandler); } catch { }
+      return NextResponse.json(
+        { error: "Parser is already in success state and cannot be processed again" },
+        { status: 400 }
+      );
+    }
+
     // Create processing row now that we have a parser ID
     const createdProcessingId = await convex.mutation(api.procedures.startParserProcessing, {
       parserId: parser._id,

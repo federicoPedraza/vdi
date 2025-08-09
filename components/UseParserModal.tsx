@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
+import JsonInspector from "@/components/JsonInspector";
 
 interface UseParserModalProps {
   isOpen: boolean;
@@ -26,16 +27,36 @@ interface UseParserModalProps {
     event?: string;
     fingerprint?: string;
     payload?: string;
+    state?: "idle" | "building" | "success" | "failed";
   };
 }
 
 export default function UseParserModal({ isOpen, onClose, parser }: UseParserModalProps) {
   const [payload, setPayload] = useState('{\n  "example": "data",\n  "client": {\n    "email": "john.doe@example.com",\n    "firstName": "John",\n    "lastName": "Doe"\n  },\n  "order": {\n    "id": "ORD-2024-001",\n    "total": 100.50,\n    "currency": "USD"\n  }\n}');
   const [isExecuting, setIsExecuting] = useState(false);
-  const [result, setResult] = useState<string | null>(null);
+  const [result, setResult] = useState<unknown | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [computedFingerprint, setComputedFingerprint] = useState<string | null>(null);
   const [isFingerprintValid, setIsFingerprintValid] = useState<boolean>(false);
+
+  const handleCopyResult = async () => {
+    if (result === null) return;
+    try {
+      const text =
+        typeof result === "string"
+          ? result
+          : (() => {
+            try {
+              return JSON.stringify(result, null, 2);
+            } catch {
+              return String(result);
+            }
+          })();
+      await navigator.clipboard.writeText(text);
+    } catch (e) {
+      console.error("Failed to copy result", e);
+    }
+  };
 
   // Fetch the latest parser data to ensure we have the code
   const freshParser = useQuery(
@@ -151,7 +172,7 @@ export default function UseParserModal({ isOpen, onClose, parser }: UseParserMod
       const parseResult = parseFunction(parsedPayload);
       console.log("Parse result:", parseResult);
 
-      setResult(typeof parseResult === "string" ? parseResult : JSON.stringify(parseResult, null, 2));
+      setResult(parseResult);
 
     } catch (execError) {
       console.error("Parser execution error:", execError);
@@ -166,6 +187,10 @@ export default function UseParserModal({ isOpen, onClose, parser }: UseParserMod
     setResult(null);
     setError(null);
     onClose();
+  };
+
+  const handleRemoveResult = () => {
+    setResult(null);
   };
 
   return (
@@ -203,20 +228,23 @@ export default function UseParserModal({ isOpen, onClose, parser }: UseParserMod
             </div>
           </div>
 
-          {error && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-md">
-              <p className="text-red-800 text-sm font-medium">Error:</p>
-              <p className="text-red-700 text-sm">{error}</p>
-            </div>
-          )}
-
-          {result && (
+          {result !== null && (
             <div className="grid gap-3">
-              <div className="p-3 rounded-md">
-                <Label className="text-sm font-medium">Output:</Label>
-                <pre className="mt-2 text-xs p-2 border rounded overflow-x-auto whitespace-pre-wrap">
-                  {result}
-                </pre>
+              <div className="rounded-md">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-medium">Output:</Label>
+                  <div className="flex flex-row justify-end items-center gap-2">
+                    <button onClick={handleCopyResult} title="Copy output" className="p-1 rounded hover:bg-gray-100">
+                      <img src="/svg/doodles/copy.svg" alt="Copy" className="w-4 h-4" />
+                    </button>
+                    <button onClick={handleRemoveResult} title="Remove output" className="p-1 rounded hover:bg-gray-100">
+                      <img src="/svg/doodles/close.svg" alt="Copy" className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-2 p-2 border rounded overflow-x-auto">
+                  <JsonInspector data={result} />
+                </div>
               </div>
             </div>
           )}

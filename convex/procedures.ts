@@ -929,12 +929,25 @@ export const deleteParser = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    // Delete related parser_processings first
+    const parser = await ctx.db.get(args.parserId);
+    if (!parser) return null;
+
+    // Prevent deleting while parser is building/running
+    if ((parser.state as any) === "building") {
+      throw new Error("Cannot delete a parser while it is running/building");
+    }
+
+    // Prevent deleting if there is an active processing still running
     const processings = await ctx.db
       .query("parser_processings")
       .withIndex("by_parser", (q) => q.eq("parserId", args.parserId))
       .collect();
+    const hasActive = processings.some((p) => p.status === "running" && !p.finishedAt);
+    if (hasActive) {
+      throw new Error("Cannot delete a parser while a processing is running");
+    }
 
+    // Delete related parser_processings first
     for (const processing of processings) {
       await ctx.db.delete(processing._id);
     }
