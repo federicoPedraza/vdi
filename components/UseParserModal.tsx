@@ -166,10 +166,18 @@ export default function UseParserModal({ isOpen, onClose, parser }: UseParserMod
       // Create the parser function and execute it
       const parseFunction = new Function(
         "payload",
-        `${activeParser.code}\nreturn typeof main === 'function' ? main(payload) : (typeof exec === 'function' ? exec(payload) : (function(){ throw new Error('No main or exec function found'); })());`
+        "callbacks",
+        `${activeParser.code}\nreturn typeof main === 'function' ? main(payload) : (typeof exec === 'function' ? exec(payload, callbacks) : (function(){ throw new Error('No main or exec function found'); })());`
       );
 
-      const parseResult = parseFunction(parsedPayload);
+      const parseResult = parseFunction(parsedPayload, {
+        success: (r: unknown) => {
+          // Optional UI hook; keep quiet, but could setResult(r) early if desired
+        },
+        fail: (e: unknown) => {
+          console.warn("exec.fail callback", e);
+        },
+      });
       console.log("Parse result:", parseResult);
 
       setResult(parseResult);

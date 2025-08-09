@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import CreateParserModal from "@/components/CreateParserModal";
 // Project list/selection is fetched via Next API to use httpOnly cookie
 
 export default function Home() {
@@ -131,6 +132,7 @@ export default function Home() {
   const [schemasOpen, setSchemasOpen] = useState(false);
   const [schemas, setSchemas] = useState<Array<{ _id: string; name: string; key?: string; alias?: string; color?: string; definition: string }>>([]);
   const [schemaDraft, setSchemaDraft] = useState<{ name: string; alias: string; color: string; key: string; definition: string }>({ name: "", alias: "", color: "#ffffff", key: "", definition: "{\n  \"type\": \"object\"\n}" });
+  const [createParserOpen, setCreateParserOpen] = useState(false);
 
   return (
     <>
@@ -307,6 +309,29 @@ export default function Home() {
                 style={{
                   WebkitMaskImage: `url(/svg/doodles/code.svg)`,
                   maskImage: `url(/svg/doodles/code.svg)`,
+                  WebkitMaskRepeat: "no-repeat",
+                  maskRepeat: "no-repeat",
+                  WebkitMaskPosition: "center",
+                  maskPosition: "center",
+                  WebkitMaskSize: "contain",
+                  maskSize: "contain",
+                  backgroundColor: "currentColor",
+                }}
+              />
+            </button>
+            <button
+              type="button"
+              aria-label="Create parser"
+              onClick={() => setCreateParserOpen(true)}
+              className="w-6 h-6 text-white/80 hover:text-white"
+              title="Create parser"
+            >
+              <span
+                aria-hidden
+                className="block w-full h-full"
+                style={{
+                  WebkitMaskImage: `url(/svg/doodles/plus.svg)`,
+                  maskImage: `url(/svg/doodles/plus.svg)`,
                   WebkitMaskRepeat: "no-repeat",
                   maskRepeat: "no-repeat",
                   WebkitMaskPosition: "center",
@@ -616,6 +641,15 @@ export default function Home() {
           const pj = await r.json();
           setProjects(pj.projects || []);
           if (!activeProjectId && pj.activeProjectId) setActiveProjectId(pj.activeProjectId);
+        }}
+      />
+
+      {/* Create Parser Modal */}
+      <CreateParserModal
+        isOpen={createParserOpen}
+        onClose={() => setCreateParserOpen(false)}
+        onCreated={async () => {
+          // No-op: the parsers list auto-refreshes via Convex; if not, we could trigger a refresh
         }}
       />
     </>

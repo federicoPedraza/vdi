@@ -16,6 +16,22 @@ export async function GET(req: NextRequest) {
   }
 }
 
+export async function PUT(req: NextRequest) {
+  // Assign or unassign schemas to a parser (optional future use)
+  try {
+    const token = req.cookies.get("octos_session")?.value;
+    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const body = await req.json();
+    const { parserId } = body as { parserId?: string };
+    if (!parserId) return NextResponse.json({ error: "Missing parserId" }, { status: 400 });
+    // This endpoint reserved for future assignments management if needed from UI list
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Failed";
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const token = req.cookies.get("octos_session")?.value;

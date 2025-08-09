@@ -234,20 +234,20 @@ export const upsertPartnerSettings = internalMutation({
             .withIndex("by_partner", (q) => q.eq("partnerId", args.partnerId))
             .unique();
         if (existing) {
-            const update: any = { provider: args.provider };
+            const update: Partial<{ provider: "openai" | "ollama"; openaiKeyCiphertext: string; openaiKeyIv: string; openaiKeyAuthTag: string; activeProjectId: string } > = { provider: args.provider };
             if (typeof args.openaiKeyCiphertext === "string") update.openaiKeyCiphertext = args.openaiKeyCiphertext;
             if (typeof args.openaiKeyIv === "string") update.openaiKeyIv = args.openaiKeyIv;
             if (typeof args.openaiKeyAuthTag === "string") update.openaiKeyAuthTag = args.openaiKeyAuthTag;
-            if (args.activeProjectId) update.activeProjectId = args.activeProjectId;
-            await ctx.db.patch(existing._id, update);
+            if (args.activeProjectId) update.activeProjectId = args.activeProjectId as any;
+            await ctx.db.patch(existing._id, update as any);
             return existing._id;
         }
-        const doc: any = { partnerId: args.partnerId, provider: args.provider };
+        const doc: Partial<{ partnerId: string; provider: "openai" | "ollama"; openaiKeyCiphertext?: string; openaiKeyIv?: string; openaiKeyAuthTag?: string; activeProjectId?: string }> = { partnerId: args.partnerId as any, provider: args.provider };
         if (typeof args.openaiKeyCiphertext === "string") doc.openaiKeyCiphertext = args.openaiKeyCiphertext;
         if (typeof args.openaiKeyIv === "string") doc.openaiKeyIv = args.openaiKeyIv;
         if (typeof args.openaiKeyAuthTag === "string") doc.openaiKeyAuthTag = args.openaiKeyAuthTag;
-        if (args.activeProjectId) doc.activeProjectId = args.activeProjectId;
-        return await ctx.db.insert("partner_settings", doc);
+        if (args.activeProjectId) doc.activeProjectId = args.activeProjectId as any;
+        return await ctx.db.insert("partner_settings", doc as any);
     },
 });
 
@@ -300,20 +300,20 @@ export const savePartnerSettingsForSession = mutation({
             .unique();
         let settingsId;
         if (existing) {
-            const update: any = { provider: args.provider };
+            const update: Partial<{ provider: "openai" | "ollama"; openaiKeyCiphertext: string; openaiKeyIv: string; openaiKeyAuthTag: string; activeProjectId: string }> = { provider: args.provider };
             if (typeof args.openaiKeyCiphertext === "string") update.openaiKeyCiphertext = args.openaiKeyCiphertext;
             if (typeof args.openaiKeyIv === "string") update.openaiKeyIv = args.openaiKeyIv;
             if (typeof args.openaiKeyAuthTag === "string") update.openaiKeyAuthTag = args.openaiKeyAuthTag;
-            if (args.activeProjectId) update.activeProjectId = args.activeProjectId;
-            await ctx.db.patch(existing._id, update);
+            if (args.activeProjectId) update.activeProjectId = args.activeProjectId as any;
+            await ctx.db.patch(existing._id, update as any);
             settingsId = existing._id;
         } else {
-            const doc: any = { partnerId: partner._id, provider: args.provider };
+            const doc: Partial<{ partnerId: string; provider: "openai" | "ollama"; openaiKeyCiphertext?: string; openaiKeyIv?: string; openaiKeyAuthTag?: string; activeProjectId?: string }> = { partnerId: partner._id as any, provider: args.provider };
             if (typeof args.openaiKeyCiphertext === "string") doc.openaiKeyCiphertext = args.openaiKeyCiphertext;
             if (typeof args.openaiKeyIv === "string") doc.openaiKeyIv = args.openaiKeyIv;
             if (typeof args.openaiKeyAuthTag === "string") doc.openaiKeyAuthTag = args.openaiKeyAuthTag;
-            if (args.activeProjectId) doc.activeProjectId = args.activeProjectId;
-            settingsId = await ctx.db.insert("partner_settings", doc);
+            if (args.activeProjectId) doc.activeProjectId = args.activeProjectId as any;
+            settingsId = await ctx.db.insert("partner_settings", doc as any);
         }
 
         return { settingsId, partnerName: finalName };
@@ -538,7 +538,7 @@ export const upsertSchemaByName = mutation({
             .withIndex("by_project", (q) => q.eq("projectId", projectId))
             .collect()).find((s) => s.name === args.name);
 
-        const updateFields: any = { definition: args.definition };
+        const updateFields: Partial<{ definition: unknown; key?: string; alias?: string; color?: string }> = { definition: args.definition };
         if (typeof args.key === "string") updateFields.key = args.key;
         if (typeof args.alias === "string") updateFields.alias = args.alias;
         if (typeof args.color === "string") updateFields.color = args.color;
@@ -548,7 +548,7 @@ export const upsertSchemaByName = mutation({
             return { schemaId: existing._id };
         }
         const schemaId = await ctx.db.insert("project_schemas", {
-            projectId,
+            projectId: projectId as any,
             name: args.name,
             key: args.key,
             alias: args.alias,
@@ -574,5 +574,124 @@ export const deleteSchema = mutation({
         if (!project || (project as any).partnerId !== session.partnerId) throw new Error("Unauthorized");
         await ctx.db.delete(args.schemaId);
         return null;
+    },
+});
+
+// ===== Parser <-> Schema assignments and creation =====
+
+export const isFingerprintUniqueForSession = query({
+    args: { token: v.string(), fingerprint: v.string() },
+    returns: v.object({ unique: v.boolean(), existingParserId: v.optional(v.id("parsers")) }),
+    handler: async (ctx, args) => {
+        const session = await ctx.db
+            .query("sessions")
+            .withIndex("by_token", (q) => q.eq("token", args.token))
+            .unique();
+        if (!session || session.expiresAt < Date.now()) return { unique: true };
+        const parser = await ctx.db
+            .query("parsers")
+            .withIndex("by_fingerprint", (q) => q.eq("fingerprint", args.fingerprint))
+            .filter((q) => q.eq(q.field("partnerId"), session.partnerId))
+            .first();
+        if (parser) return { unique: false, existingParserId: parser._id } as const;
+        return { unique: true } as const;
+    },
+});
+
+export const createParserForSession = mutation({
+    args: {
+        token: v.string(),
+        uuid: v.string(),
+        event: v.string(),
+        payload: v.string(),
+        fingerprint: v.string(),
+        language: v.optional(v.string()),
+        schemaAssignments: v.array(
+            v.object({ schemaId: v.id("project_schemas"), asArray: v.optional(v.boolean()) })
+        ),
+    },
+    returns: v.object({ parserId: v.id("parsers") }),
+    handler: async (ctx, args) => {
+        if (!Array.isArray(args.schemaAssignments) || args.schemaAssignments.length === 0) {
+            throw new Error("At least one schema must be assigned to a parser");
+        }
+        const session = await ctx.db
+            .query("sessions")
+            .withIndex("by_token", (q) => q.eq("token", args.token))
+            .unique();
+        if (!session || session.expiresAt < Date.now()) throw new Error("Unauthorized");
+
+        // Ensure fingerprint is unique for this partner
+        const existing = await ctx.db
+            .query("parsers")
+            .withIndex("by_fingerprint", (q) => q.eq("fingerprint", args.fingerprint))
+            .filter((q) => q.eq(q.field("partnerId"), session.partnerId))
+            .first();
+        if (existing) {
+            throw new Error("A parser with this fingerprint already exists");
+        }
+
+        // Verify schemas belong to this partner via their project
+        for (const assignment of args.schemaAssignments) {
+            const schema = await ctx.db.get(assignment.schemaId);
+            if (!schema) throw new Error("Invalid schema");
+            const project = await ctx.db.get((schema as any).projectId);
+            if (!project || (project as any).partnerId !== session.partnerId) {
+                throw new Error("Invalid schema");
+            }
+        }
+
+        const parserId = await ctx.db.insert("parsers", {
+            uuid: args.uuid,
+            language: args.language || "javascript",
+            code: "// Parser code will be generated when processed",
+            payload: args.payload,
+            event: args.event,
+            fingerprint: args.fingerprint,
+            state: "idle" as const,
+            partnerId: session.partnerId,
+        } as any);
+
+        // Create assignments
+        for (const assignment of args.schemaAssignments) {
+            await ctx.db.insert("schema_parser_assignments", {
+                schemaId: assignment.schemaId as any,
+                parserId: parserId as any,
+                asArray: assignment.asArray === true,
+            });
+        }
+
+        return { parserId };
+    },
+});
+
+export const getAssignedSchemasForParser = query({
+    args: { parserId: v.id("parsers") },
+    returns: v.array(
+        v.object({
+            name: v.string(),
+            schema: v.string(),
+            description: v.string(),
+            asArray: v.optional(v.boolean()),
+            key: v.optional(v.string()),
+        })
+    ),
+    handler: async (ctx, args) => {
+        const assignments = await ctx.db
+            .query("schema_parser_assignments")
+            .withIndex("by_parser", (q) => q.eq("parserId", args.parserId))
+            .collect();
+        const results: Array<{ name: string; schema: string; description: string; asArray?: boolean; key?: string }> = [];
+        for (const a of assignments) {
+            const schemaDoc = await ctx.db.get((a as any).schemaId);
+            if (!schemaDoc) continue;
+            const def = (schemaDoc as any).definition;
+            const schemaString = typeof def === "string" ? def : JSON.stringify(def ?? {}, null, 2);
+            const description = (schemaDoc as any).alias || (schemaDoc as any).key || (schemaDoc as any).name;
+            const asArray = (a as any).asArray === true;
+            const key = (schemaDoc as any).key;
+            results.push({ name: (schemaDoc as any).name, schema: schemaString, description, asArray, key });
+        }
+        return results;
     },
 });

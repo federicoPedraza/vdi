@@ -47,7 +47,7 @@ interface Processing {
 
 export default function ParsersTable() {
   const token = typeof document !== "undefined" ? (document.cookie.match(/(?:^|; )octos_session=([^;]+)/)?.[1] || null) : null;
-  const partnerScoped = useQuery(api.authDb.getParsersForSession as any, token ? ({ token } as { token: string }) : "skip") as (Parser[] | undefined) | null;
+  const partnerScoped = useQuery(api.authDb.getParsersForSession, token ? ({ token } as { token: string }) : "skip") as (Parser[] | undefined) | null;
   const allParsers = useQuery(api.procedures.getAllParsers) as Parser[] | undefined;
   const parsers = (partnerScoped ?? undefined) || allParsers;
   const deleteParserMutation = useMutation(api.procedures.deleteParser);
@@ -241,7 +241,6 @@ export default function ParsersTable() {
     );
   });
 
-  const [selectedById, setSelectedById] = useState<Record<string, boolean>>({});
   const [expandedById, setExpandedById] = useState<Record<string, boolean>>({});
   const [fingerprintDialogOpen, setFingerprintDialogOpen] = useState(false);
   const [activeFingerprint, setActiveFingerprint] = useState<string | null>(null);
@@ -433,29 +432,6 @@ export default function ParsersTable() {
     );
   });
 
-  const allIds = (parsers ?? []).map((p) => (p._id as unknown as string));
-  const numSelected = allIds.filter((id) => selectedById[id]).length;
-  const allSelected = parsers && parsers.length > 0 && numSelected === parsers.length;
-  const noneSelected = numSelected === 0;
-  const someSelected = !noneSelected && !allSelected;
-
-  const toggleAll = () => {
-    if (!parsers) return;
-    if (allSelected) {
-      setSelectedById({});
-    } else {
-      const next: Record<string, boolean> = {};
-      for (const p of parsers) {
-        next[p._id as unknown as string] = true;
-      }
-      setSelectedById(next);
-    }
-  };
-
-  const toggleOne = (id: string) => {
-    setSelectedById((prev) => ({ ...prev, [id]: !prev[id] }));
-  };
-
   const toggleExpanded = (id: string) => {
     setExpandedById((prev) => ({ ...prev, [id]: !prev[id] }));
   };
@@ -499,9 +475,10 @@ export default function ParsersTable() {
       </div>
     );
     if (processings.length === 0) return <div className="p-2 text-sm opacity-70">No processes yet.</div>;
-
+    
+    const extendedClassName = cn("rounded-md bg-background/40 p-3", processings.length === 0 ? "border-b border-white/10" : "border-b-0");
     return (
-      <div className="rounded-md bg-background/40 p-3 border-b border-white/10">
+      <div className={extendedClassName}>
         <Table className="w-full">
           <TableHeader>
             <TableRow>
@@ -553,28 +530,6 @@ export default function ParsersTable() {
           <Table className="w-full mx-auto">
             <TableHeader>
               <TableRow>
-                <TableHead className="w-8 p-0">
-                  <button className="block p-0 m-0" onClick={toggleAll} aria-label="Select all">
-                    <span
-                      aria-hidden
-                      className={cn(
-                        "inline-block w-4 h-4 mx-2 align-middle text-white",
-                        someSelected ? "opacity-100 hover:opacity-40 transition-opacity duration-200" : allSelected ? "opacity-100" : "opacity-10 hover:opacity-40 transition-opacity duration-200",
-                      )}
-                      style={{
-                        WebkitMaskImage: `url(${someSelected ? "/svg/doodles/checkbox-middle.svg" : allSelected ? "/svg/doodles/checkbox-on.svg" : "/svg/doodles/checkbox-off.svg"})`,
-                        maskImage: `url(${someSelected ? "/svg/doodles/checkbox-middle.svg" : allSelected ? "/svg/doodles/checkbox-on.svg" : "/svg/doodles/checkbox-off.svg"})`,
-                        WebkitMaskRepeat: "no-repeat",
-                        maskRepeat: "no-repeat",
-                        WebkitMaskPosition: "center",
-                        maskPosition: "center",
-                        WebkitMaskSize: "contain",
-                        maskSize: "contain",
-                        backgroundColor: "currentColor",
-                      }}
-                    />
-                  </button>
-                </TableHead>
                 <TableHead className="text-center font-bold uppercase underline">Fingerprint</TableHead>
                 <TableHead className="text-center font-bold uppercase underline">Code</TableHead>
                 <TableHead className="font-bold uppercase underline">Language</TableHead>
@@ -586,33 +541,9 @@ export default function ParsersTable() {
             <TableBody>
               {parsers.map((parser) => {
                 const id = parser._id as unknown as string;
-                const isSelected = !!selectedById[id];
                 return (
                   <Fragment key={id}>
                     <TableRow>
-                    <TableCell className="p-0 align-middle">
-                      <button
-                        className="block p-0 m-0"
-                        onClick={() => toggleOne(id)}
-                        aria-label={isSelected ? "Deselect" : "Select"}
-                      >
-                        <span
-                          aria-hidden
-                          className={cn("inline-block w-4 h-4 mx-2 align-middle", isSelected ? "opacity-100" : "opacity-10 hover:opacity-40 transition-opacity duration-200")}
-                          style={{
-                            WebkitMaskImage: `url(/svg/doodles/checkbox-on.svg)`,
-                            maskImage: `url(/svg/doodles/checkbox-on.svg)`,
-                            WebkitMaskRepeat: "no-repeat",
-                            maskRepeat: "no-repeat",
-                            WebkitMaskPosition: "center",
-                            maskPosition: "center",
-                            WebkitMaskSize: "contain",
-                            maskSize: "contain",
-                            backgroundColor: "currentColor",
-                          }}
-                        />
-                      </button>
-                    </TableCell>
                       <TableCell className="font-mono text-center p-0 w-0">
                       <button
                         className="p-0 m-0 inline-flex items-center justify-center transition-transform duration-150 hover:scale-110 focus:outline-none focus:ring-2 focus:ring-cyan-500 rounded"

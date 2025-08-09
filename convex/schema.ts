@@ -97,6 +97,15 @@ export default defineSchema({
     definition: v.any(),
   }).index("by_project", ["projectId"]),
 
+  // Many-to-many relation between schemas and parsers
+  schema_parser_assignments: defineTable({
+    schemaId: v.id("project_schemas"),
+    parserId: v.id("parsers"),
+    asArray: v.optional(v.boolean()),
+  })
+    .index("by_schema", ["schemaId"]) 
+    .index("by_parser", ["parserId"]),
+
   // Per-partner settings and preferences
   partner_settings: defineTable({
     partnerId: v.id("partners"),

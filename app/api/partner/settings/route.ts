@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
       openaiKeyAuthTag = enc.authTag;
     }
 
-    const result = await convex.mutation(api.authDb.savePartnerSettingsForSession as any, {
+    const result = await convex.mutation(api.authDb.savePartnerSettingsForSession, {
       token,
       name,
       provider,

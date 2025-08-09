@@ -224,6 +224,15 @@ export const deleteParser = mutation({
       await ctx.db.delete(processing._id);
     }
 
+    // Delete schema assignments
+    const assignments = await ctx.db
+      .query("schema_parser_assignments")
+      .withIndex("by_parser", (q) => q.eq("parserId", args.parserId))
+      .collect();
+    for (const a of assignments) {
+      await ctx.db.delete(a._id);
+    }
+
     // Finally delete the parser
     await ctx.db.delete(args.parserId);
     return null;
@@ -527,10 +536,18 @@ export const processBuildingParser = action({
       // Execute the parser with the original payload
       const parseFunction = new Function(
         "payload",
-        `${parser.code || ""}\nreturn exec(payload);`
+        "callbacks",
+        `${parser.code || ""}\nreturn exec(payload, callbacks);`
       );
 
-      const result = parseFunction(parser.payload);
+      const result = parseFunction(parser.payload, {
+        success: () => {
+          // no-op on server; success is inferred from result structure below
+        },
+        fail: () => {
+          // no-op on server; failure will be handled by catch or structure validation
+        },
+      });
 
       if (result && result.client && result.order) {
         // Process the parsed data
