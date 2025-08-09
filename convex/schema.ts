@@ -74,4 +74,36 @@ export default defineSchema({
   })
     .index("by_token", ["token"])
     .index("by_partner", ["partnerId"]),
+
+  // Partner projects/collections for organizing schemas
+  projects: defineTable({
+    partnerId: v.id("partners"),
+    name: v.string(),
+    slug: v.optional(v.string()),
+    description: v.optional(v.string()),
+  })
+    .index("by_partner", ["partnerId"])
+    .index("by_slug", ["partnerId", "slug"]),
+
+  // Schemas within a project; definition is arbitrary JSON schema/structure
+  project_schemas: defineTable({
+    projectId: v.id("projects"),
+    name: v.string(),
+    key: v.optional(v.string()),
+    alias: v.optional(v.string()),
+    color: v.optional(v.string()),
+    definition: v.any(),
+  }).index("by_project", ["projectId"]),
+
+  // Per-partner settings and preferences
+  partner_settings: defineTable({
+    partnerId: v.id("partners"),
+    provider: v.union(v.literal("openai"), v.literal("ollama")),
+    // Encrypted OpenAI API key (AES-GCM): base64-encoded fields
+    openaiKeyCiphertext: v.optional(v.string()),
+    openaiKeyIv: v.optional(v.string()),
+    openaiKeyAuthTag: v.optional(v.string()),
+    // Currently selected project for the partner (optional)
+    activeProjectId: v.optional(v.id("projects")),
+  }).index("by_partner", ["partnerId"]),
 });

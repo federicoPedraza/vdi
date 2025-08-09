@@ -3,6 +3,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../convex/_generated/api";
 import { Ollama } from "ollama";
 import OpenAI from "openai";
+import { createDecipheriv, createHash } from "crypto";
 import { buildSystemPrompt, buildUserPrompt, BuildSystemPromptSchema } from "@/convex/constants";
 import { v4 as uuidv4 } from 'uuid';
 
@@ -20,6 +21,7 @@ type GenerationOptions = {
   provider?: ModelProvider;
   openaiModel?: string;
   ollamaModel?: string;
+  openaiApiKey?: string;
 };
 
 async function generateParserCode(
@@ -48,11 +50,17 @@ async function generateParserCode(
   await logger.log(`System prompt length: ${systemPrompt.length} characters`);
   await logger.log(`User prompt length: ${userPrompt.length} characters`);
   await logger.log(`Preparation time: ${promptTime - startTime}ms`);
-  const provider: ModelProvider = options.provider || (process.env.OPENAI_DEFAULT === "true" ? "openai" : "ollama");
+  // Resolve provider using options first, else default to Ollama
+  let provider: ModelProvider = options.provider || "ollama";
+  try {
+    // Try to infer from a cookie-bound session if running in a request context
+    // This function can be called from the POST handler which fetches session settings
+    // so it will be overridden below; we keep this as a safe default here.
+  } catch { }
   await logger.log(`🤖 Model provider: ${provider}`);
 
   const { code, metaLogs } = provider === "openai"
-    ? await generateWithOpenAI({ systemPrompt, userPrompt, logger, model: options.openaiModel })
+    ? await generateWithOpenAI({ systemPrompt, userPrompt, logger, model: options.openaiModel, apiKey: options.openaiApiKey || "" })
     : await generateWithOllama({ systemPrompt, userPrompt, logger, preferredModel: options.ollamaModel });
 
   // Sanitize accidental code fences or prefixes
@@ -236,13 +244,14 @@ async function generateWithOpenAI(args: {
   userPrompt: string;
   logger: ProcessLogger;
   model?: string;
+  apiKey: string;
 }): Promise<{ code: string; metaLogs?: string[] }> {
-  const { systemPrompt, userPrompt, logger, model } = args;
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY is not set");
+  const { systemPrompt, userPrompt, logger, model, apiKey } = args;
+  if (!apiKey) {
+    throw new Error("OpenAI API key is not set");
   }
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  const chosenModel = model || process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const openai = new OpenAI({ apiKey });
+  const chosenModel = model || "gpt-4o-mini";
 
   await logger.log(`🧠 Selected OpenAI model: ${chosenModel}`);
   let generatedCode = "";
@@ -348,7 +357,7 @@ export async function POST(request: NextRequest) {
 
   try {
     bufferLog(`📥 [${new Date().toISOString()}] Parsing request body...`);
-    const { parserId, provider, openaiModel, ollamaModel } = await request.json();
+    const { parserId, provider: providerOverride, openaiModel, ollamaModel } = await request.json();
     parsedParserId = parserId ?? null;
 
     if (!parserId) {
@@ -363,6 +372,35 @@ export async function POST(request: NextRequest) {
     bufferLog(`🪪 Request ID: ${requestId}`);
     bufferLog(`Step 1: Validated request and parserId`);
     bufferLog(`🔄 Processing individual parser: ${parserId}`);
+
+    // Determine partner via session for settings
+    const sessionToken = request.cookies.get("octos_session")?.value;
+    let partnerProvider: ModelProvider | null = null;
+    let partnerOpenAIApiKey: string | null = null;
+    if (sessionToken) {
+      try {
+        const settings = await convex.query(api.authDb.getPartnerSettingsBySession as any, { token: sessionToken });
+        if (settings?.provider === "openai" || settings?.provider === "ollama") {
+          partnerProvider = settings.provider as ModelProvider;
+        }
+        // If provider is OpenAI and encrypted key fields are present, decrypt with server key
+        if (settings?.provider === "openai" && settings?.openaiKeyCiphertext && settings?.openaiKeyIv && settings?.openaiKeyAuthTag) {
+          const secret = process.env.ENCRYPTION_KEY;
+          if (secret) {
+            const key = createHash("sha256").update(secret).digest();
+            const iv = Buffer.from(settings.openaiKeyIv, "base64");
+            const authTag = Buffer.from(settings.openaiKeyAuthTag, "base64");
+            const decipher = createDecipheriv("aes-256-gcm", key, iv);
+            decipher.setAuthTag(authTag);
+            const plaintext = Buffer.concat([
+              decipher.update(Buffer.from(settings.openaiKeyCiphertext, "base64")),
+              decipher.final(),
+            ]);
+            partnerOpenAIApiKey = plaintext.toString("utf8");
+          }
+        }
+      } catch { }
+    }
 
     // Get the specific parser (allow idle or building)
     bufferLog(`Step 2: Fetching parser from database...`);
@@ -437,7 +475,7 @@ export async function POST(request: NextRequest) {
         parser.event,
         originalPayload,
         logger!,
-        { provider, openaiModel, ollamaModel }
+        { provider: (providerOverride as ModelProvider) || partnerProvider || "ollama", openaiModel, ollamaModel, openaiApiKey: partnerOpenAIApiKey || "" }
       );
       const generatedCode = generated.code;
       const codeGenTime = Date.now() - codeGenStartTime;
@@ -545,7 +583,7 @@ export async function POST(request: NextRequest) {
           }
         });
       } else {
-        await logger.error(`❌ Parser result validation failed`); 
+        await logger.error(`❌ Parser result validation failed`);
         await logger.error(`Got: ${JSON.stringify(result, null, 2)}`);
         throw new Error("Parser execution failed - invalid result structure");
       }

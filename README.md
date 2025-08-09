@@ -34,6 +34,17 @@ To learn more about developing your project with Convex, check out:
 - [Stack](https://stack.convex.dev/) for in-depth articles on advanced topics.
 - [Convex Auth docs](https://labs.convex.dev/auth) for documentation on the Convex Auth library.
 
+## Data Model extensions
+
+This app organizes partner target schemas into Projects (collections). Each `project` can contain many `project_schemas` (e.g., `orders`, `clients`, `products`, `shippings`).
+
+Added tables:
+
+- `projects`: `{ partnerId, name, slug?, description? }`
+- `project_schemas`: `{ projectId, name, key?, definition }`
+
+Partner settings now also track `activeProjectId` so the UI can show and switch the current project from the header.
+
 ## Configuring other authentication methods
 
 To configure different authentication methods, see [Configuration](https://labs.convex.dev/auth/config) in the Convex Auth docs.
