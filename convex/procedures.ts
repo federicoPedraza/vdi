@@ -791,6 +791,7 @@ export const getAllParsers = query({
     language: v.string(),
     event: v.string(),
     fingerprint: v.string(),
+    payload: v.string(),
     state: v.union(v.literal("idle"), v.literal("building"), v.literal("success"), v.literal("failed")),
   })),
   handler: async (ctx, args) => {
@@ -803,6 +804,7 @@ export const getAllParsers = query({
       language: parser.language,
       event: parser.event,
       fingerprint: parser.fingerprint,
+      payload: parser.payload,
       state: (parser.state as any) || "success" as const,
     }));
   },
@@ -927,6 +929,17 @@ export const deleteParser = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
+    // Delete related parser_processings first
+    const processings = await ctx.db
+      .query("parser_processings")
+      .withIndex("by_parser", (q) => q.eq("parserId", args.parserId))
+      .collect();
+
+    for (const processing of processings) {
+      await ctx.db.delete(processing._id);
+    }
+
+    // Finally delete the parser
     await ctx.db.delete(args.parserId);
     return null;
   },
@@ -1407,6 +1420,7 @@ export const startParserProcessing = mutation({
     parserId: v.id("parsers"),
     requestId: v.string(),
     initialStep: v.number(),
+    totalSteps: v.optional(v.number()),
     initialLogs: v.optional(v.string()),
     systemPrompt: v.optional(v.string()),
     userPrompt: v.optional(v.string()),
@@ -1417,6 +1431,7 @@ export const startParserProcessing = mutation({
       parserId: args.parserId,
       requestId: args.requestId,
       step: args.initialStep,
+      totalSteps: args.totalSteps,
       logs: args.initialLogs ?? "",
       status: "running" as const,
       startedAt: Date.now(),
@@ -1490,6 +1505,7 @@ export const getProcessingsByParser = query({
     parserId: v.id("parsers"),
     requestId: v.string(),
     step: v.number(),
+    totalSteps: v.optional(v.number()),
     logs: v.string(),
     status: v.union(v.literal("running"), v.literal("success"), v.literal("failed")),
     startedAt: v.number(),
@@ -1515,6 +1531,7 @@ export const getProcessingByRequestId = query({
     parserId: v.id("parsers"),
     requestId: v.string(),
     step: v.number(),
+    totalSteps: v.optional(v.number()),
     logs: v.string(),
     status: v.union(v.literal("running"), v.literal("success"), v.literal("failed")),
     startedAt: v.number(),

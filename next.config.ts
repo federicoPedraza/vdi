@@ -4,9 +4,7 @@ const nextConfig: NextConfig = {
   /* config options here */
 
   // Configure API route timeouts for parser processing
-  experimental: {
-    serverComponentsExternalPackages: ['ollama'],
-  },
+  serverExternalPackages: ['ollama'],
 
   // Configure serverless function timeout (for platforms like Vercel)
   async headers() {

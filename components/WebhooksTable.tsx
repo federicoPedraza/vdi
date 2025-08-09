@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import TiendanubeWebhooks from "./TiendanubeWebhooks";
+import { Spinner } from "@/components/ui/spinner";
 
 interface WebhookLog {
   _id: Id<"webhook_logs">;
@@ -171,8 +172,8 @@ export default function WebhooksTable() {
                 </div>
 
                 {!webhookLogs ? (
-                  <div className="text-center py-8">
-                    <p className="text-muted-foreground">Loading webhook logs...</p>
+                  <div className="flex justify-center py-8">
+                    <Spinner size={24} aria-label="Loading webhook logs" />
                   </div>
                 ) : webhookLogs.length === 0 ? (
                   <div className="text-center py-8">

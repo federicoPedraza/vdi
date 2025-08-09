@@ -160,6 +160,7 @@ export default defineSchema({
     parserId: v.id("parsers"),
     requestId: v.string(),
     step: v.number(),
+    totalSteps: v.optional(v.number()),
     logs: v.string(), // concatenated logs with breaklines
     status: v.union(v.literal("running"), v.literal("success"), v.literal("failed")),
     startedAt: v.number(),

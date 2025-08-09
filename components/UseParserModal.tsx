@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
 
 interface UseParserModalProps {
   isOpen: boolean;
@@ -122,7 +123,7 @@ export default function UseParserModal({ isOpen, onClose, parser }: UseParserMod
     <Dialog open={isOpen} onOpenChange={handleClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Use Parser: {activeParser.name}</DialogTitle>
+          <DialogTitle>Use Parser: {freshParser?.event ?? parser.name}</DialogTitle>
           <DialogDescription>
             Test the parser by providing a JSON payload. The parsed data will be stored in the database.
           </DialogDescription>
@@ -178,7 +179,16 @@ export default function UseParserModal({ isOpen, onClose, parser }: UseParserMod
             disabled={isExecuting || !activeParser.code}
             className="bg-blue-600 hover:bg-blue-700"
           >
-            {isExecuting ? "Executing..." : !activeParser.code ? "No Code Available" : "Execute Parser"}
+            {isExecuting ? (
+              <span className="inline-flex items-center gap-2">
+                <Spinner size={16} aria-label="Executing" />
+                Executing
+              </span>
+            ) : !activeParser.code ? (
+              "No Code Available"
+            ) : (
+              "Execute Parser"
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>

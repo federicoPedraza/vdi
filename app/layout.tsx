@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import ConvexClientProvider from "@/components/ConvexClientProvider";
+import RequestSimulator from "@/components/RequestSimulator";
 
 export const metadata: Metadata = {
   title: "VII",
@@ -26,7 +27,10 @@ export default function RootLayout({
         />
       </head>
       <body className="antialiased">
-        <ConvexClientProvider>{children}</ConvexClientProvider>
+        <ConvexClientProvider>
+          {children}
+          <RequestSimulator />
+        </ConvexClientProvider>
       </body>
     </html>
   );
