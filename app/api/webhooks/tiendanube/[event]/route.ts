@@ -3,13 +3,7 @@ import { TiendanubeAPI } from '@/lib/tiendanube';
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@/convex/_generated/api";
 import { v4 as uuidv4 } from "uuid";
-
-function generateFingerprint(payload: any): string {
-  return Object
-    .keys(payload || {})
-    .sort()
-    .join('|');
-}
+import { getFingerprint } from '../../vii/[event]/route';
 
 // Tiendanube-specific webhook payload interface
 interface TiendanubeWebhookPayload {
@@ -78,7 +72,7 @@ export async function POST(
         }
 
         // Generate fingerprint from payload structure
-        const fingerprint = generateFingerprint(payloadForParser);
+        const fingerprint = getFingerprint(payloadForParser);
 
         // Check if we already have a parser for this fingerprint
         const existingParser = await convex.query(api.procedures.getParserByFingerprint, {

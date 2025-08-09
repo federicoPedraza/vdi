@@ -165,6 +165,9 @@ export default defineSchema({
     startedAt: v.number(),
     finishedAt: v.optional(v.number()),
     error: v.optional(v.string()),
+    // Store prompts used for this processing run
+    systemPrompt: v.optional(v.string()),
+    userPrompt: v.optional(v.string()),
   })
     .index("by_parser", ["parserId"])
     .index("by_request", ["requestId"])

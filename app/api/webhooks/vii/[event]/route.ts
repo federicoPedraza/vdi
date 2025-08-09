@@ -3,24 +3,45 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "@/convex/_generated/api";
 import { v4 as uuidv4 } from "uuid";
 
-function generateFingerprint(payload: any): string {
-  return Object
-    .keys(payload || {})
-    .sort()
-    .join('|');
+function getType(value: any): string {
+    if (value === null) return "null";
+    if (Array.isArray(value)) return "array";
+    return typeof value;
+}
+
+function buildSignature(obj: any): string {
+    if (Array.isArray(obj)) {
+        if (obj.length === 0) return "[]";
+        return `[${buildSignature(obj[0])}]`;
+    } else if (obj && typeof obj === "object") {
+        const keys = Object.keys(obj).sort();
+        const inner = keys.map(key => {
+            const val = buildSignature(obj[key]);
+            return `${key}:${val}`;
+        }).join(",");
+        return `{${inner}}`;
+    } else {
+        return getType(obj);
+    }
+}
+
+export function getFingerprint(payload: any): string {
+    if (typeof payload !== "object" || payload == null) return getType(payload);
+    const keys = Object.keys(payload).sort();
+    return keys.map(key => `${key}:${buildSignature(payload[key])}`).join(";");
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ event: string }> }) {
     const { event } = await params;
     const body = await request.json();
     console.log(`Received webhook: ${event}`, body);
-            // Process with AI parser generator on server side
+    // Process with AI parser generator on server side
     try {
         const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL || 'https://famous-firefly-743.convex.cloud';
         const convex = new ConvexHttpClient(convexUrl);
 
         // Generate fingerprint from payload structure
-        const fingerprint = generateFingerprint(body);
+        const fingerprint = getFingerprint(body);
 
         // Check if we already have a parser for this fingerprint
         const existingParser = await convex.query(api.procedures.getParserByFingerprint, {
@@ -28,7 +49,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         });
 
         if (existingParser) {
-                        console.log('✅ Found existing parser for fingerprint, reusing...');
+            console.log('✅ Found existing parser for fingerprint, reusing...');
             console.log(`Existing parser: ${existingParser.uuid}`);
 
             // TODO: Execute the existing parser here

@@ -1400,13 +1400,6 @@ export const getParserById = internalQuery({
   },
 });
 
-function generateFingerprint(payload: any): string {
-  return Object
-    .keys(payload || {})
-    .sort()
-    .join('|');
-}
-
 // ===== PARSER PROCESSING TRACKING =====
 
 export const startParserProcessing = mutation({
@@ -1415,6 +1408,8 @@ export const startParserProcessing = mutation({
     requestId: v.string(),
     initialStep: v.number(),
     initialLogs: v.optional(v.string()),
+    systemPrompt: v.optional(v.string()),
+    userPrompt: v.optional(v.string()),
   },
   returns: v.id("parser_processings"),
   handler: async (ctx, args) => {
@@ -1425,6 +1420,8 @@ export const startParserProcessing = mutation({
       logs: args.initialLogs ?? "",
       status: "running" as const,
       startedAt: Date.now(),
+      systemPrompt: args.systemPrompt,
+      userPrompt: args.userPrompt,
     });
     return processingId;
   },
@@ -1442,6 +1439,22 @@ export const appendProcessingLog = mutation({
     if (!current) return null;
     const newLogs = (current.logs || "") + (current.logs ? "\n" : "") + args.message;
     await ctx.db.patch(args.processingId, { logs: newLogs, step: args.step });
+    return null;
+  },
+});
+
+export const setProcessingPrompts = mutation({
+  args: {
+    processingId: v.id("parser_processings"),
+    systemPrompt: v.string(),
+    userPrompt: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.processingId, {
+      systemPrompt: args.systemPrompt,
+      userPrompt: args.userPrompt,
+    });
     return null;
   },
 });
@@ -1482,6 +1495,8 @@ export const getProcessingsByParser = query({
     startedAt: v.number(),
     finishedAt: v.optional(v.number()),
     error: v.optional(v.string()),
+    systemPrompt: v.optional(v.string()),
+    userPrompt: v.optional(v.string()),
   })),
   handler: async (ctx, args) => {
     return await ctx.db
@@ -1505,6 +1520,8 @@ export const getProcessingByRequestId = query({
     startedAt: v.number(),
     finishedAt: v.optional(v.number()),
     error: v.optional(v.string()),
+    systemPrompt: v.optional(v.string()),
+    userPrompt: v.optional(v.string()),
   }), v.null()),
   handler: async (ctx, args) => {
     const proc = await ctx.db
