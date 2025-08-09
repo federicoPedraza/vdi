@@ -1,21 +1,34 @@
-const SYSTEM_PROMPT = `You are an expert developer that creates parsers to convert webhook payloads to a specific database schema.
+export interface BuildSystemPromptSchema {
+  name: string;
+  schema: string;
+  description: string;
+}
+
+export const buildSystemPrompt = (schemas: BuildSystemPromptSchema[]) => {
+
+  const targetSchema = schemas.map(schema => `
+    ${schema.name}:
+    ${schema.schema}
+  `).join("\n");
+
+  const targetSchemaDescription = schemas.map(schema => `
+    - ${schema.name}: ${schema.description}
+  `).join("\n");
+
+  const targetSchemaReturnExample = schemas.map(schema => `
+    ${schema.name}:
+    "example"
+  `).join("\n");
+
+  return `You are an expert developer that creates parsers to convert webhook payloads to a specific database schema.
 
   TARGET SCHEMA - Convert webhook payload to this exact structure:
 
-  CLIENT_SCHEMA_TEMPLATE:
-
-  ORDER_SCHEMA_TEMPLATE:
-
-  SHIPPING_SCHEMA_TEMPLATE:
-
-  ORDER_LINES_SCHEMA_TEMPLATE:
+  ${targetSchema}
 
   INSTRUCTIONS:
   1. Create a javascript function that takes a webhook payload and returns an object with:
-    - client: CLIENT_SCHEMA object
-    - order: ORDER_SCHEMA object (without clientId)
-    - shipping?: SHIPPING_SCHEMA object (without orderId) - only if shipping info exists
-    - orderLines?: Array of ORDER_LINES_SCHEMA objects (without orderId) - only if line items exist
+    ${targetSchemaDescription}
 
   2. Handle missing fields gracefully - use fallback values or undefined
   3. Convert dates to timestamps (milliseconds since epoch)
@@ -25,28 +38,36 @@ const SYSTEM_PROMPT = `You are an expert developer that creates parsers to conve
   7. Function should be named 'exec'
   8. Handle errors gracefully and return null for unparseable data
 
-  Example structure:
+  Example return structure:
   \`\`\`javascript
   function exec(payload) {
     try {
       // Extract and transform data here
       return {
-        client: { /* CLIENT_SCHEMA */ },
-        order: { /* ORDER_SCHEMA without clientId */ },
-        shipping: { /* SHIPPING_SCHEMA without orderId */ }, // optional
-        orderLines: [ /* ORDER_LINES_SCHEMA without orderId */ ] // optional
-      };
+        ${targetSchemaReturnExample}
+      }
     } catch (error) {
       console.error('Parser error:', error);
       return null;
     }
   }
 \`\`\``
-
-export const buildSystemPrompt = (clientSchema: string, orderSchema: string, shippingSchema: string, orderLinesSchema: string) => {
-  return SYSTEM_PROMPT
-    .replace("CLIENT_SCHEMA_TEMPLATE", clientSchema)
-    .replace("ORDER_SCHEMA_TEMPLATE", orderSchema)
-    .replace("SHIPPING_SCHEMA_TEMPLATE", shippingSchema)
-    .replace("ORDER_LINES_SCHEMA_TEMPLATE", orderLinesSchema);
 };
+
+export const buildUserPrompt = (event: string, payload: any, language: string, schemas: BuildSystemPromptSchema[]) => {
+  return `You are generating code. Output ONLY raw ${language} code for a single function named exec with the exact signature: function exec(payload) { /* ... */ }.
+
+  Requirements:
+  - The function must be named exactly: exec
+  - It must accept one argument named payload
+  - It must return an object with at least the fields: ${schemas.map(schema => `{ ${schema.name}: any }`).join(", ")}
+  - Do not include any markdown, comments, imports, or surrounding text
+  - Do not wrap in backticks
+
+  Context:
+  Event: ${event}
+  Payload (representative structure):
+  ${JSON.stringify(payload)}
+
+  Return only the function code. Nothing else.`
+}

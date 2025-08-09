@@ -3,8 +3,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../convex/_generated/api";
 import { Ollama } from "ollama";
 import OpenAI from "openai";
-import { buildSystemPrompt } from "@/convex/constants";
-import { clientSchema, orderSchema, shippingSchema, orderLinesSchema } from "@/convex/schema";
+import { buildSystemPrompt, buildUserPrompt, BuildSystemPromptSchema } from "@/convex/constants";
 import { v4 as uuidv4 } from 'uuid';
 
 const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
@@ -38,23 +37,11 @@ async function generateParserCode(
   await logger.log(`Payload simplified size: ${JSON.stringify(transformedPayload).length} characters`);
   const language = "javascript";
 
-  const userPrompt = `You are generating code. Output ONLY raw ${language} code for a single function named exec with the exact signature: function exec(payload) { /* ... */ }.
+  // take partner's active schemas
+  const schemas: BuildSystemPromptSchema[] = [];
 
-  Requirements:
-  - The function must be named exactly: exec
-  - It must accept one argument named payload
-  - It must return an object with at least the fields: { client: any, order: any }
-  - Do not include any markdown, comments, imports, or surrounding text
-  - Do not wrap in backticks
-
-  Context:
-  Event: ${event}
-  Payload (representative structure):
-  ${JSON.stringify(transformedPayload)}
-
-  Return only the function code. Nothing else.`;
-
-  const systemPrompt = buildSystemPrompt(JSON.stringify(clientSchema), JSON.stringify(orderSchema), JSON.stringify(shippingSchema), JSON.stringify(orderLinesSchema));
+  const systemPrompt = buildSystemPrompt(schemas);
+  const userPrompt = buildUserPrompt(event, transformedPayload, language, schemas);
 
   const promptTime = Date.now();
   await logger.log(`📝 [${new Date().toISOString()}] Prompts prepared`);
@@ -493,10 +480,8 @@ export async function POST(request: NextRequest) {
       logger.setStep(7);
       await logger.log(`🔍 Validating parser execution result...`);
       await logger.log(`Result type: ${typeof result}`);
-      await logger.log(`Has client: ${!!(result && result.client)}`);
-      await logger.log(`Has order: ${!!(result && result.order)}`);
 
-      if (result && result.client && result.order) {
+      if (result) {
         await logger.log(`✅ Parser result validation passed`);
 
         // Update the parser with the generated code first
@@ -516,10 +501,6 @@ export async function POST(request: NextRequest) {
         const finalProcessingStartTime = Date.now();
 
         await logger.log(`📊 Processing parsed data...`);
-        await logger.log(`Client data: ${JSON.stringify(result.client).substring(0, 200)}...`);
-        await logger.log(`Order data: ${JSON.stringify(result.order).substring(0, 200)}...`);
-        await logger.log(`Has shipping: ${!!result.shipping}`);
-        await logger.log(`Has order lines: ${!!result.orderLines}`);
 
         // Update parser to success state
         await convex.mutation(api.procedures.updateParserSuccessPublic, {
@@ -564,8 +545,7 @@ export async function POST(request: NextRequest) {
           }
         });
       } else {
-        await logger.error(`❌ Parser result validation failed`);
-        await logger.error(`Expected: result.client and result.order`);
+        await logger.error(`❌ Parser result validation failed`); 
         await logger.error(`Got: ${JSON.stringify(result, null, 2)}`);
         throw new Error("Parser execution failed - invalid result structure");
       }
