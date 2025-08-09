@@ -206,13 +206,21 @@ export default function CreateParserModal({ isOpen, onClose, onCreated }: { isOp
             </div>
             <div className="grid gap-1">
               <Label htmlFor="cp-payload">Payload (JSON example)</Label>
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1 min-w-0">
                 <Editor
                   value={payload}
                   onValueChange={setPayload}
                   highlight={(code) => Prism.highlight(code, Prism.languages.json, "json")}
                   padding={10}
-                  style={{ fontFamily: '"Fira code", monospace', fontSize: 14 }}
+                  style={{
+                    fontFamily: '"Fira code", monospace',
+                    fontSize: 14,
+                    width: "100%",
+                    maxWidth: "100%",
+                    minHeight: 120,
+                    maxHeight: 320,
+                    overflow: "auto",
+                  }}
                 />
               </div>
               {parsedPayload === null && <div className="text-xs text-red-400">Invalid JSON</div>}
@@ -312,13 +320,21 @@ export default function CreateParserModal({ isOpen, onClose, onCreated }: { isOp
             )}
             <div className="grid gap-1">
               <Label htmlFor="cp-response">Response (JSON example)</Label>
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1 min-w-0">
                 <Editor
                   value={responseExample}
                   onValueChange={() => { /* read-only preview */ }}
                   highlight={(code) => Prism.highlight(code, Prism.languages.json, "json")}
                   padding={10}
-                  style={{ fontFamily: '"Fira code", monospace', fontSize: 14 }}
+                  style={{
+                    fontFamily: '"Fira code", monospace',
+                    fontSize: 14,
+                    width: "100%",
+                    maxWidth: "100%",
+                    minHeight: 120,
+                    maxHeight: 320,
+                    overflow: "auto",
+                  }}
                 />
               </div>
             </div>

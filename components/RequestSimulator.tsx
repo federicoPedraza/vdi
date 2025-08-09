@@ -16,6 +16,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { countTokens } from "gpt-tokenizer";
 import { countTokens as countTokensCl100 } from "gpt-tokenizer/encoding/cl100k_base";
+import Editor from "react-simple-code-editor";
+import Prism from "prismjs";
+import "prismjs/components/prism-json";
+import "prismjs/themes/prism-tomorrow.css";
 
 type HttpMethod = "POST" | "GET" | "PUT" | "PATCH" | "DELETE";
 
@@ -31,8 +35,6 @@ const DEFAULT_BODY = {
   id: 123,
   store_id: 456,
 };
-
-const JSON_PLACEHOLDER = '{\n  "event": "order/created",\n  "id": 123,\n  "store_id": 456\n}';
 
 export default function RequestSimulator() {
   const [open, setOpen] = useState(false);
@@ -216,14 +218,26 @@ export default function RequestSimulator() {
 
           <div className="grid gap-2">
             <Label htmlFor="body">Body (JSON)</Label>
-            <Textarea
-              id="body"
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              placeholder={JSON_PLACEHOLDER}
-            />
-            <div className="mt-1 text-xs text-muted-foreground text-left">
-              Tokens (o200k_base): {tokenCount ?? "—"}
+            <div className="flex flex-col gap-1 min-w-0">
+              <Editor
+                value={body}
+                onValueChange={setBody}
+                highlight={(code) => Prism.highlight(code, Prism.languages.json, "json")}
+                padding={10}
+                className="w-full border rounded-md font-mono text-sm"
+                style={{
+                  fontFamily: '"Fira code", monospace',
+                  fontSize: 14,
+                  width: "100%",
+                  maxWidth: "100%",
+                  minHeight: 160,
+                  maxHeight: 290,
+                  overflow: "auto",
+                }}
+              />
+              <div className="mt-1 text-xs text-muted-foreground text-left">
+                Tokens (o200k_base): {tokenCount ?? "—"}
+              </div>
             </div>
           </div>
 

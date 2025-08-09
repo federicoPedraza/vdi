@@ -515,6 +515,40 @@ export const resetFailedParser = mutation({
 });
 
 /**
+ * Reset a parser (any non-building state) back to idle and clear code
+ */
+export const resetParser = mutation({
+  args: {
+    parserId: v.id("parsers"),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const parser = await ctx.db.get(args.parserId);
+    if (!parser) return null;
+
+    if (parser.state === "building") {
+      throw new Error("Cannot reset a parser while it is building");
+    }
+
+    // Prevent resetting if there is an active processing still running
+    const processings = await ctx.db
+      .query("parser_processings")
+      .withIndex("by_parser", (q) => q.eq("parserId", args.parserId))
+      .collect();
+    const hasActive = processings.some((p) => p.status === "running" && !p.finishedAt);
+    if (hasActive) {
+      throw new Error("Cannot reset a parser while a processing is running");
+    }
+
+    await ctx.db.patch(args.parserId, {
+      state: "idle" as const,
+      code: undefined,
+    });
+    return null;
+  },
+});
+
+/**
  * Process a building parser with its original payload
  */
 export const processBuildingParser = action({

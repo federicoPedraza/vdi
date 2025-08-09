@@ -202,7 +202,7 @@ export default function Home() {
                 </span>
               </button>
               {projectMenuOpen && (
-                <div className="absolute z-20 mt-1 min-w-[220px] border border-white/20 bg-black/95 shadow-lg">
+                <div className="absolute z-20 mt-1 min-w-[220px] bg-black/95 shadow-lg">
                   <ul role="listbox" className="max-h-64 overflow-auto">
                     {projectOptions.map((p) => (
                       <li key={p.id} role="option" aria-selected={p.id === activeProjectId}>
@@ -319,19 +319,30 @@ export default function Home() {
                 }}
               />
             </button>
+          </div>
+          <div className="flex flex-row items-center justify-end gap-2 w-full">
+            {
+              partner && (
+                <span className="text-xs text-white/70 hidden sm:block" title="Model provider">
+                  Adapters
+                </span>
+              )
+            }
             <button
               type="button"
-              aria-label="Create parser"
-              onClick={() => setCreateParserOpen(true)}
+              aria-label="Adapters"
+              onClick={async () => {
+                setCreateParserOpen(true);
+              }}
               className="w-6 h-6 text-white/80 hover:text-white"
-              title="Create parser"
+              title="Adapters"
             >
               <span
                 aria-hidden
                 className="block w-full h-full"
                 style={{
-                  WebkitMaskImage: `url(/svg/doodles/plus.svg)`,
-                  maskImage: `url(/svg/doodles/plus.svg)`,
+                  WebkitMaskImage: `url(/svg/doodles/adapters.svg)`,
+                  maskImage: `url(/svg/doodles/adapters.svg)`,
                   WebkitMaskRepeat: "no-repeat",
                   maskRepeat: "no-repeat",
                   WebkitMaskPosition: "center",

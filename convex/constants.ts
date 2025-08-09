@@ -49,8 +49,8 @@ export const buildSystemPrompt = (schemas: BuildSystemPromptSchema[]) => {
 
   STRICT RULES TO AVOID HALLUCINATIONS:
   - Do NOT fabricate or invent values. Only map data that is present in the payload and can be considered as a valid value for any of the target schema fields.
-  - If a value is missing or cannot be determined, set it to undefined or omit the optional field.
-  - Empty arrays are allowed; do NOT create placeholder or fake items.
+  - If a value is missing or cannot be determined, set it to undefined or omit the optional field. For empty arrays, set it to an empty array.
+  - Do NOT create placeholder or fake items.
   - Prefer direct field mapping. Apply simple transformations only when clearly derivable (e.g., date string to timestamp).
 
   INSTRUCTIONS:
