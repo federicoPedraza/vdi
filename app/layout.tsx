@@ -4,10 +4,10 @@ import ConvexClientProvider from "@/components/ConvexClientProvider";
 import RequestSimulator from "@/components/RequestSimulator";
 
 export const metadata: Metadata = {
-  title: "VII",
+  title: "Octos",
   description: "Adapters",
   icons: {
-    icon: "/convex.svg",
+    icon: "/svg/doodles/vdi-logo.svg",
   },
 };
 

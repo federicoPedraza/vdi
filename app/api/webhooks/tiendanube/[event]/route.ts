@@ -35,6 +35,17 @@ export async function POST(
         const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL || 'https://famous-firefly-743.convex.cloud';
         const convex = new ConvexHttpClient(convexUrl);
 
+        // Require a valid partner via session cookie
+        const token = request.cookies.get('octos_session')?.value;
+        if (!token) {
+            return NextResponse.json({ message: "Partner authentication required" }, { status: 401 });
+        }
+        const partner = await convex.query(api.authDb.getPartnerBySession as any, { token });
+        if (!partner?._id) {
+            return NextResponse.json({ message: "Invalid or expired session" }, { status: 401 });
+        }
+        const partnerId: any = partner._id as any;
+
         // Determine the payload to use for parser generation first
         let payloadForParser: TiendanubeWebhookPayload | OrderDetailsPayload = body;
 
@@ -105,6 +116,7 @@ export async function POST(
             payload: JSON.stringify(payloadForParser),
             event: event,
             fingerprint,
+            partnerId,
         });
 
         console.log('✅ Parser saved with "building" state');

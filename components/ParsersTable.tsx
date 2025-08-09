@@ -46,7 +46,10 @@ interface Processing {
 }
 
 export default function ParsersTable() {
-  const parsers = useQuery(api.procedures.getAllParsers) as Parser[] | undefined;
+  const token = typeof document !== "undefined" ? (document.cookie.match(/(?:^|; )octos_session=([^;]+)/)?.[1] || null) : null;
+  const partnerScoped = useQuery(api.authDb.getParsersForSession as any, token ? ({ token } as { token: string }) : "skip") as (Parser[] | undefined) | null;
+  const allParsers = useQuery(api.procedures.getAllParsers) as Parser[] | undefined;
+  const parsers = (partnerScoped ?? undefined) || allParsers;
   const deleteParserMutation = useMutation(api.procedures.deleteParser);
   const [processingById, setProcessingById] = useState<Record<string, boolean>>({});
   const [useParserOpen, setUseParserOpen] = useState(false);
@@ -545,7 +548,7 @@ export default function ParsersTable() {
   return (
     <div>
       {parsers.length === 0 ? (
-        <div className="py-4">No adapters yet.</div>
+        <div className="py-4 w-full text-center">No adapters yet.</div>
       ) : (
           <Table className="w-full mx-auto">
             <TableHeader>
