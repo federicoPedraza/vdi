@@ -26,7 +26,54 @@ export const createPartner = internalMutation({
   args: { email: v.string(), name: v.string(), passwordHash: v.string(), salt: v.string() },
   returns: v.id("partners"),
   handler: async (ctx, args) => {
-    return await ctx.db.insert("partners", args);
+    const base = args.name
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[^\w\s-]/g, "")
+      .trim()
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-");
+
+    let slug = base || "partner";
+    let attempt = 1;
+    // Ensure uniqueness
+    for (;;) {
+      const existing = await ctx.db
+        .query("partners")
+        .withIndex("by_slug", (q) => q.eq("slug", slug))
+        .first();
+      if (!existing) break;
+      attempt += 1;
+      slug = `${base}-${attempt}`;
+    }
+
+    return await ctx.db.insert("partners", {
+      email: args.email,
+      name: args.name,
+      slug,
+      passwordHash: args.passwordHash,
+      salt: args.salt,
+    });
+  },
+});
+
+export const getPartnerBySlug = query({
+  args: { slug: v.string() },
+  returns: v.union(
+    v.object({
+      _id: v.id("partners"),
+      _creationTime: v.number(),
+      email: v.string(),
+      name: v.string(),
+      slug: v.string(),
+    }),
+    v.null()
+  ),
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("partners")
+      .withIndex("by_slug", (q) => q.eq("slug", args.slug))
+      .unique();
   },
 });
 
@@ -380,7 +427,28 @@ export const createProjectForSession = mutation({
             partnerId: session.partnerId,
             name: args.name.trim(),
         };
-        if (args.slug && args.slug.trim()) doc.slug = args.slug.trim();
+        // Normalize and enforce unique slug per partner
+        const normalizeSlug = (s: string) =>
+            s
+                .toLowerCase()
+                .normalize("NFKD")
+                .replace(/[^\w\s-]/g, "")
+                .trim()
+                .replace(/\s+/g, "-")
+                .replace(/-+/g, "-");
+
+        const desiredSlugInput = (args.slug && args.slug.trim()) || args.name.trim();
+        const desiredSlug = normalizeSlug(desiredSlugInput);
+        if (desiredSlug) {
+            const existingWithSlug = await ctx.db
+                .query("projects")
+                .withIndex("by_slug", (q) => q.eq("partnerId", session.partnerId).eq("slug", desiredSlug))
+                .first();
+            if (existingWithSlug) {
+                throw new Error("Slug already in use");
+            }
+            doc.slug = desiredSlug;
+        }
         if (args.description && args.description.trim()) doc.description = args.description.trim();
 
         const projectId = await ctx.db.insert("projects", doc);

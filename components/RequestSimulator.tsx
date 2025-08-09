@@ -36,8 +36,8 @@ const JSON_PLACEHOLDER = '{\n  "event": "order/created",\n  "id": 123,\n  "store
 
 export default function RequestSimulator() {
   const [open, setOpen] = useState(false);
-  const [endpoint, setEndpoint] = useState("/api/webhooks/vii/order.created");
-  const [event, setEvent] = useState("order.created");
+  const [endpoint, setEndpoint] = useState("/api/[slug]/webhooks/vii");
+  const [event, setEvent] = useState("");
   const [method, setMethod] = useState<HttpMethod>("POST");
   const [headers, setHeaders] = useState(DEFAULT_HEADERS);
   const [body, setBody] = useState<string>(JSON.stringify(DEFAULT_BODY, null, 2));
@@ -155,7 +155,7 @@ export default function RequestSimulator() {
             <Label htmlFor="endpoint">Endpoint</Label>
             <Input
               id="endpoint"
-              placeholder="/api/webhooks/vii/order.created"
+              placeholder="/api/[slug]/webhooks/vii/order.created"
               value={endpoint}
               onChange={(e) => setEndpoint(e.target.value)}
             />

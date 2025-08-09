@@ -47,8 +47,8 @@ curl -X POST http://localhost:3000/api/webhooks/shopify/orders-create \
   -H "Content-Type: application/json" \
   -d '{"event":"orders/create","id":4567890123456789,"store_id":123456}'
 
-# Test unknown provider webhook with complete order data
-curl -X POST http://localhost:3000/api/webhooks/vii/order-created \
+# Test unknown provider webhook with complete order data (slugged partner)
+curl -X POST http://localhost:3000/api/{your-partner-slug}/webhooks/vii/order-created \
   -H "Content-Type: application/json" \
   -d '{
   "example": "data",

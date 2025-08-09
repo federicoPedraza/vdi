@@ -91,6 +91,11 @@
     font-family: "Syne Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     @apply bg-black text-white;
   }
+  /* Ensure all placeholders render at 60% opacity */
+  input::placeholder,
+  textarea::placeholder {
+    opacity: 0.6;
+  }
 }
 
 /* Animated gradient helper for the landing title */

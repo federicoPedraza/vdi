@@ -61,7 +61,7 @@ export const getAllParsers = query({
     state: v.union(v.literal("idle"), v.literal("building"), v.literal("success"), v.literal("failed")),
     partnerId: v.id("partners"),
   })),
-  handler: async (ctx, args) => {
+  handler: async (ctx) => {
     const parsers = await ctx.db.query("parsers").order("desc").collect();
     return parsers.map(parser => ({
       _id: parser._id,
@@ -72,8 +72,8 @@ export const getAllParsers = query({
       event: parser.event,
       fingerprint: parser.fingerprint,
       payload: parser.payload,
-      state: (parser.state as any) || "success" as const,
-      partnerId: (parser as any).partnerId,
+      state: parser.state || "success" as const,
+      partnerId: parser.partnerId,
     }));
   },
 });
@@ -205,7 +205,7 @@ export const deleteParser = mutation({
     if (!parser) return null;
 
     // Prevent deleting while parser is building/running
-    if ((parser.state as any) === "building") {
+    if (parser.state === "building") {
       throw new Error("Cannot delete a parser while it is running/building");
     }
 
@@ -344,7 +344,7 @@ export const getBuildingParsers = query({
       state: v.union(v.literal("idle"), v.literal("building"), v.literal("success"), v.literal("failed")),
     })
   ),
-  handler: async (ctx, args) => {
+  handler: async (ctx) => {
     return await ctx.db
       .query("parsers")
       .withIndex("by_state", (q) => q.eq("state", "building"))
@@ -370,7 +370,7 @@ export const getPendingParsers = query({
       state: v.union(v.literal("idle"), v.literal("building"), v.literal("success"), v.literal("failed")),
     })
   ),
-  handler: async (ctx, args) => {
+  handler: async (ctx) => {
     const idle = await ctx.db
       .query("parsers")
       .withIndex("by_state", (q) => q.eq("state", "idle"))

@@ -10,15 +10,19 @@ export async function GET(req: NextRequest) {
     if (!token) return NextResponse.json({ projects: [], activeProjectId: null }, { status: 200 });
 
     const [projects, active] = await Promise.all([
-      convex.query(api.authDb.listProjectsBySession as any, { token }),
-      convex.query(api.authDb.getActiveProjectBySession as any, { token }),
+      convex.query(api.authDb.listProjectsBySession, { token }),
+      convex.query(api.authDb.getActiveProjectBySession, { token }),
     ]);
 
     return NextResponse.json({
-      projects: (projects || []).map((p: any) => ({ _id: p._id, name: p.name })),
+      projects: (Array.isArray(projects) ? projects : []).map((p: Record<string, unknown>) => ({
+        _id: String(p._id),
+        name: String(p.name),
+        slug: typeof p.slug === "string" ? p.slug : undefined,
+      })),
       activeProjectId: active?._id ?? null,
     });
-  } catch (e) {
+  } catch {
     return NextResponse.json({ projects: [], activeProjectId: null }, { status: 200 });
   }
 }
@@ -33,7 +37,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
     }
 
-    const result = await convex.mutation(api.authDb.createProjectForSession as any, {
+    const result = await convex.mutation(api.authDb.createProjectForSession, {
       token,
       name,
       slug,

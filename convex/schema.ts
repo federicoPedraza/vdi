@@ -61,10 +61,12 @@ export default defineSchema({
   partners: defineTable({
     email: v.string(),
     name: v.string(),
+    slug: v.string(),
     passwordHash: v.string(),
     salt: v.string(),
   })
-    .index("by_email", ["email"]),
+    .index("by_email", ["email"]) 
+    .index("by_slug", ["slug"]),
 
   // Session tokens for basic login
   sessions: defineTable({
