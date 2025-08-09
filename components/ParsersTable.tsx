@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Spinner } from "@/components/ui/spinner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import UseParserModal from "@/components/UseParserModal";
 
 interface Parser {
   _id: Id<"parsers">;
@@ -47,6 +48,9 @@ interface Processing {
 export default function ParsersTable() {
   const parsers = useQuery(api.procedures.getAllParsers) as Parser[] | undefined;
   const deleteParserMutation = useMutation(api.procedures.deleteParser);
+  const [processingById, setProcessingById] = useState<Record<string, boolean>>({});
+  const [useParserOpen, setUseParserOpen] = useState(false);
+  const [useParserTarget, setUseParserTarget] = useState<Parser | null>(null);
 
   const defaultDateOptions: Intl.DateTimeFormatOptions = {
     month: "long",
@@ -453,6 +457,29 @@ export default function ParsersTable() {
     setExpandedById((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
+  const runProcessParser = async (parser: Parser) => {
+    const id = parser._id as unknown as string;
+    try {
+      setProcessingById((prev) => ({ ...prev, [id]: true }));
+      setExpandedById((prev) => ({ ...prev, [id]: true }));
+      const response = await fetch("/api/process-parser", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parserId: parser._id }),
+      });
+      if (!response.ok) {
+        // Try to read JSON error but fallback to status
+        let errorBody: unknown = null;
+        try { errorBody = await response.json(); } catch { }
+        console.error("Failed to start parser processing", { status: response.status, error: errorBody });
+      }
+    } catch (err) {
+      console.error("Failed to start parser processing", err);
+    } finally {
+      setProcessingById((prev) => ({ ...prev, [id]: false }));
+    }
+  };
+
   function ParserProcessings({ parserId }: { parserId: Id<"parsers"> }) {
     const processings = useQuery(api.procedures.getProcessingsByParser, { parserId }) as Processing[] | undefined;
     const [, forceTick] = useState(0);
@@ -592,7 +619,7 @@ export default function ParsersTable() {
                       >
                         <span
                           aria-hidden
-                          className={`inline-block w-6 h-6 align-middle transition-opacity duration-150 hover:opacity-80 ${parser.state === "failed" ? "text-red-200" : parser.state === "building" ? "text-cyan-200" : "text-white"}`}
+                            className={`inline-block w-6 h-6 align-middle transition-opacity duration-150 hover:opacity-80 ${parser.state === "failed" ? "text-red-200" : parser.state === "success" ? "text-green-200" : parser.state === "building" ? "text-cyan-200" : "text-white"}`}
                           style={{
                               WebkitMaskImage: `url(${parser.state === "success" ? "/svg/doodles/fingerprint-done.svg" : parser.state === "failed" ? "/svg/doodles/fingerprint-pending.svg" : parser.state === "building" ? "/svg/doodles/fingerprint-building.svg" : "/svg/doodles/fingerprint-pending.svg"})`,
                               maskImage: `url(${parser.state === "success" ? "/svg/doodles/fingerprint-done.svg" : parser.state === "failed" ? "/svg/doodles/fingerprint-pending.svg" : parser.state === "building" ? "/svg/doodles/fingerprint-building.svg" : "/svg/doodles/fingerprint-pending.svg"})`,
@@ -636,14 +663,41 @@ export default function ParsersTable() {
                     <TableCell>{formatDate(parser._creationTime)}</TableCell>
                     <TableCell>
                       <div>
-                          {/* EXECUTE */}
+                          {/* PLAY */}
                           <button
                             className="p-2 inline-flex items-center justify-center transition-transform duration-150 hover:scale-110 focus:outline-none focus:ring-2 focus:ring-cyan-500 rounded disabled:cursor-default"
-                            onClick={() => { }}
+                            onClick={() => { setUseParserTarget(parser); setUseParserOpen(true); }}
+                            disabled={!!processingById[id] || parser.state === "building"}
+                            aria-label="Run parser"
+                            title="Run parser"
                           >
                             <span
                               aria-hidden
-                              className="inline-block w-5 h-5 align-middle text-blue-400 transition-opacity duration-150 hover:opacity-80"
+                              className={`inline-block w-5 h-5 align-middle transition-opacity duration-150 ${processingById[id] || parser.state === "building" ? "opacity-30" : "text-green-400 hover:opacity-80"}`}
+                              style={{
+                                WebkitMaskImage: `url(/svg/doodles/play.svg)`,
+                                maskImage: `url(/svg/doodles/play.svg)`,
+                                WebkitMaskRepeat: "no-repeat",
+                                maskRepeat: "no-repeat",
+                                WebkitMaskPosition: "center",
+                                maskPosition: "center",
+                                WebkitMaskSize: "contain",
+                                maskSize: "contain",
+                                backgroundColor: "currentColor",
+                              }}
+                            />
+                          </button>
+                          {/* EXECUTE */}
+                          <button
+                            className="p-2 inline-flex items-center justify-center transition-transform duration-150 hover:scale-110 focus:outline-none focus:ring-2 focus:ring-cyan-500 rounded disabled:cursor-default"
+                            onClick={() => runProcessParser(parser)}
+                            disabled={!!processingById[id] || parser.state === "building"}
+                            aria-label="Run parser"
+                            title="Run parser"
+                          >
+                            <span
+                              aria-hidden
+                              className={`inline-block w-5 h-5 align-middle transition-opacity duration-150 ${processingById[id] || parser.state === "building" ? "opacity-30" : "text-blue-400 hover:opacity-80"}`}
                               style={{
                                 WebkitMaskImage: `url(/svg/doodles/love.svg)`,
                                 maskImage: `url(/svg/doodles/love.svg)`,
@@ -675,7 +729,7 @@ export default function ParsersTable() {
                           >
                             <span
                               aria-hidden
-                              className="inline-block w-5 h-5 align-middle text-green-400 transition-opacity duration-150 hover:opacity-80"
+                              className={`inline-block w-5 h-5 align-middle transition-opacity duration-150 ${processingById[id] || parser.state === "building" ? "opacity-30" : "text-yellow-400 hover:opacity-80"}`}
                               style={{
                                 WebkitMaskImage: `url(/svg/doodles/parse.svg)`,
                                 maskImage: `url(/svg/doodles/parse.svg)`,
@@ -823,6 +877,21 @@ export default function ParsersTable() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {useParserTarget && (
+        <UseParserModal
+          isOpen={useParserOpen}
+          onClose={() => setUseParserOpen(false)}
+          parser={{
+            _id: useParserTarget._id,
+            uuid: useParserTarget.uuid,
+            code: useParserTarget.code,
+            event: useParserTarget.event,
+            fingerprint: useParserTarget.fingerprint,
+            payload: useParserTarget.payload,
+          }}
+        />
+      )}
     </div>
   );
 }

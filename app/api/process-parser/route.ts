@@ -299,6 +299,44 @@ export async function POST(request: NextRequest) {
   let processingId: string | null = null;
   let preProcessingLogBuffer = "";
 
+  let parsedParserId: string | null = null;
+  let convexParserId: string | null = null;
+  let failureMarked = false;
+
+  const markFailed = async (reason: string) => {
+    if (failureMarked) return;
+    failureMarked = true;
+    try {
+      const idToFail = (convexParserId || parsedParserId) as any;
+      if (idToFail) {
+        await convex.mutation(api.procedures.updateParserFailedPublic, { parserId: idToFail });
+      }
+    } catch (e) {
+      console.error("Failed to mark parser failed:", (e as Error)?.message);
+    }
+    try {
+      if (processingId) {
+        await convex.mutation(api.procedures.markProcessingFailed, {
+          processingId: processingId as any,
+          error: reason || "Request aborted",
+        });
+      }
+    } catch (e) {
+      console.error("Failed to mark processing failed:", (e as Error)?.message);
+    }
+  };
+
+  const abortHandler = () => {
+    console.warn(`🔌 [${new Date().toISOString()}] Request aborted`);
+    markFailed("Request aborted or endpoint crashed").catch((e) =>
+      console.error("Failed to mark failed on abort:", (e as Error)?.message),
+    );
+  };
+  // Best-effort: catch client disconnects/timeouts
+  try {
+    request.signal.addEventListener("abort", abortHandler);
+  } catch { }
+
   const bufferLog = (message: string) => {
     console.log(message);
     preProcessingLogBuffer += (preProcessingLogBuffer ? "\n" : "") + message;
@@ -324,9 +362,11 @@ export async function POST(request: NextRequest) {
   try {
     bufferLog(`📥 [${new Date().toISOString()}] Parsing request body...`);
     const { parserId, provider, openaiModel, ollamaModel } = await request.json();
+    parsedParserId = parserId ?? null;
 
     if (!parserId) {
       console.error(`❌ [${new Date().toISOString()}] Missing parser ID in request`);
+      try { request.signal.removeEventListener("abort", abortHandler); } catch { }
       return NextResponse.json(
         { error: "Parser ID is required" },
         { status: 400 }
@@ -346,6 +386,7 @@ export async function POST(request: NextRequest) {
     if (!parser) {
       console.error(`❌ [${new Date().toISOString()}] Parser not found`);
       console.error(`Requested ID: ${parserId}`);
+      try { request.signal.removeEventListener("abort", abortHandler); } catch { }
       return NextResponse.json(
         { error: "Parser not found or not in building state" },
         { status: 404 }
@@ -372,6 +413,7 @@ export async function POST(request: NextRequest) {
       logger.setStep(3);
       await logger.log(`\n🔄 [${new Date().toISOString()}] STARTING PARSER PROCESSING`);
       await logger.log(`Parser: ${parser.uuid}`);
+      convexParserId = parser._id as any;
 
       // Mark parser as building and add placeholder code
       await logger.log(`💾 Marking parser as building...`);
@@ -470,14 +512,6 @@ export async function POST(request: NextRequest) {
         await logger.log(`Has shipping: ${!!result.shipping}`);
         await logger.log(`Has order lines: ${!!result.orderLines}`);
 
-        // Store the processed data directly (filter out null values)
-        await convex.mutation(api.procedures.processWebhookDataPublic, {
-          clientData: filterNullValues(result.client),
-          orderData: filterNullValues(result.order),
-          shippingData: result.shipping ? filterNullValues(result.shipping) : undefined,
-          orderLinesData: result.orderLines ? result.orderLines.map(filterNullValues) : undefined,
-        });
-
         // Update parser to success state
         await convex.mutation(api.procedures.updateParserSuccessPublic, {
           parserId: parser._id,
@@ -503,6 +537,10 @@ export async function POST(request: NextRequest) {
         await logger.log(`- Final processing: ${finalProcessingTime}ms`);
 
         await convex.mutation(api.procedures.markProcessingSuccess, { processingId: processingId as any });
+
+        try {
+          request.signal.removeEventListener("abort", abortHandler);
+        } catch { }
 
         return NextResponse.json({
           message: "Parser processed successfully",
@@ -533,24 +571,12 @@ export async function POST(request: NextRequest) {
       await logger?.error(`Total time before failure: ${totalRequestTime}ms`);
       await logger?.error(`Stack trace: ${(error instanceof Error ? error.stack : 'No stack trace') as string}`);
 
-      // Update parser to failed state
-      await logger?.log(`💾 Updating parser to failed state...`);
-      try {
-        const updateStartTime = Date.now();
-        await convex.mutation(api.procedures.updateParserFailedPublic, {
-          parserId: parser._id,
-        });
-        const updateTime = Date.now() - updateStartTime;
-        await logger?.log(`✅ Parser state updated to failed in ${updateTime}ms`);
-      } catch (updateError) {
-        await logger?.error(`❌ Failed to update parser state: ${(updateError as Error)?.message}`);
-      }
-
-      if (processingId) {
-        await convex.mutation(api.procedures.markProcessingFailed, { processingId: processingId as any, error: errorMessage });
-      }
+      await markFailed(errorMessage);
 
       await logger?.log(`\n📤 Returning error response`);
+      try {
+        request.signal.removeEventListener("abort", abortHandler);
+      } catch { }
       return NextResponse.json({
         message: "Parser processing failed",
         parserId: parser._id,
@@ -574,6 +600,12 @@ export async function POST(request: NextRequest) {
     console.error(`Error message: ${errorMessage}`);
     console.error(`Total request time: ${totalRequestTime}ms`);
     console.error(`Stack trace:`, error instanceof Error ? error.stack : 'No stack trace');
+
+    await markFailed(errorMessage);
+
+    try {
+      request.signal.removeEventListener("abort", abortHandler);
+    } catch { }
 
     return NextResponse.json(
       {

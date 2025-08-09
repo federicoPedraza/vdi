@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { useMutation, useQuery } from "convex/react";
+import React, { useState, useEffect, useMemo } from "react";
+import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
 import {
@@ -21,17 +21,21 @@ interface UseParserModalProps {
   onClose: () => void;
   parser: {
     _id: Id<"parsers">;
-    name: string;
     uuid: string;
     code?: string;
+    event?: string;
+    fingerprint?: string;
+    payload?: string;
   };
 }
 
 export default function UseParserModal({ isOpen, onClose, parser }: UseParserModalProps) {
   const [payload, setPayload] = useState('{\n  "example": "data",\n  "client": {\n    "email": "john.doe@example.com",\n    "firstName": "John",\n    "lastName": "Doe"\n  },\n  "order": {\n    "id": "ORD-2024-001",\n    "total": 100.50,\n    "currency": "USD"\n  }\n}');
   const [isExecuting, setIsExecuting] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [computedFingerprint, setComputedFingerprint] = useState<string | null>(null);
+  const [isFingerprintValid, setIsFingerprintValid] = useState<boolean>(false);
 
   // Fetch the latest parser data to ensure we have the code
   const freshParser = useQuery(
@@ -39,18 +43,85 @@ export default function UseParserModal({ isOpen, onClose, parser }: UseParserMod
     isOpen ? { uuid: parser.uuid } : "skip"
   );
 
-  const processWebhookData = useMutation(api.procedures.processWebhookDataPublic);
-
   // Use fresh parser data if available, fallback to prop
   const activeParser = freshParser || parser;
 
-    const executeParser = async () => {
+  // Fingerprint helpers (kept in sync with server route)
+  function getType(value: any): string {
+    if (value === null) return "null";
+    if (Array.isArray(value)) return "array";
+    return typeof value;
+  }
+  function buildSignature(obj: any): string {
+    if (Array.isArray(obj)) {
+      if (obj.length === 0) return "[]";
+      return `[${buildSignature(obj[0])}]`;
+    } else if (obj && typeof obj === "object") {
+      const keys = Object.keys(obj).sort();
+      const inner = keys
+        .map((key) => {
+          const val = buildSignature((obj as any)[key]);
+          return `${key}:${val}`;
+        })
+        .join(",");
+      return `{${inner}}`;
+    } else {
+      return getType(obj);
+    }
+  }
+  function getFingerprint(value: any): string {
+    if (typeof value !== "object" || value == null) return getType(value);
+    const keys = Object.keys(value).sort();
+    return keys.map((key) => `${key}:${buildSignature((value as any)[key])}`).join(";");
+  }
+
+  // Prefill payload from parser when opening
+  useEffect(() => {
+    if (!isOpen) return;
+    const initial = (freshParser as any)?.payload ?? parser.payload;
+    if (typeof initial === "string" && initial.length > 0) {
+      try {
+        const parsed = JSON.parse(initial);
+        setPayload(JSON.stringify(parsed, null, 2));
+      } catch {
+        setPayload(initial);
+      }
+    }
+  }, [isOpen, (freshParser as any)?.payload, parser.payload]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    try {
+      const parsed = JSON.parse(payload);
+      const fp = getFingerprint(parsed);
+      setComputedFingerprint(fp);
+      const expected = (activeParser as any)?.fingerprint as string | undefined;
+      setIsFingerprintValid(!!expected && fp === expected);
+      if (expected && fp !== expected) {
+        setError("Payload fingerprint does not match parser's fingerprint. Adjust payload to match the original structure.");
+      } else {
+        setError(null);
+      }
+    } catch {
+      setComputedFingerprint(null);
+      setIsFingerprintValid(false);
+      setError("Invalid JSON payload");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payload, isOpen, (activeParser as any)?.fingerprint]);
+
+  const executeParser = async () => {
     console.log("Original parser object:", parser);
     console.log("Fresh parser object:", freshParser);
     console.log("Active parser code:", activeParser.code);
 
     if (!activeParser.code) {
       setError("Parser code is not available. Make sure the parser has been successfully built and has generated code.");
+      return;
+    }
+
+    if (!isFingerprintValid) {
+      setError("Payload fingerprint does not match parser's fingerprint.");
       return;
     }
 
@@ -68,41 +139,19 @@ export default function UseParserModal({ isOpen, onClose, parser }: UseParserMod
         return;
       }
 
-            // Execute the parser code
+      // Execute the parser code
       console.log("Executing parser with payload:", parsedPayload);
 
       // Create the parser function and execute it
       const parseFunction = new Function(
         "payload",
-        `${activeParser.code}\nreturn exec(payload);`
+        `${activeParser.code}\nreturn typeof main === 'function' ? main(payload) : (typeof exec === 'function' ? exec(payload) : (function(){ throw new Error('No main or exec function found'); })());`
       );
 
       const parseResult = parseFunction(parsedPayload);
       console.log("Parse result:", parseResult);
 
-      if (!parseResult) {
-        setError("Parser returned null - check your payload format");
-        return;
-      }
-
-      if (!parseResult.client || !parseResult.order) {
-        setError("Parser result missing required fields (client and order)");
-        return;
-      }
-
-      // Store the parsed data in the database
-      const dbResult = await processWebhookData({
-        clientData: parseResult.client,
-        orderData: parseResult.order,
-        shippingData: parseResult.shipping,
-        orderLinesData: parseResult.orderLines,
-      });
-
-      console.log("Data stored successfully:", dbResult);
-      setResult({
-        parsed: parseResult,
-        stored: dbResult,
-      });
+      setResult(typeof parseResult === "string" ? parseResult : JSON.stringify(parseResult, null, 2));
 
     } catch (execError) {
       console.error("Parser execution error:", execError);
@@ -123,9 +172,9 @@ export default function UseParserModal({ isOpen, onClose, parser }: UseParserMod
     <Dialog open={isOpen} onOpenChange={handleClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Use Parser: {freshParser?.event ?? parser.name}</DialogTitle>
+          <DialogTitle>Run Parser: {freshParser?.event ?? parser.event ?? parser.uuid}</DialogTitle>
           <DialogDescription>
-            Test the parser by providing a JSON payload. The parsed data will be stored in the database.
+            Provide a JSON payload. We will verify the payload structure matches this parser's fingerprint before executing.
           </DialogDescription>
         </DialogHeader>
 
@@ -142,6 +191,18 @@ export default function UseParserModal({ isOpen, onClose, parser }: UseParserMod
             />
           </div>
 
+          <div className="grid gap-1 text-xs">
+            <div>
+              <span className="opacity-70">Computed fingerprint:</span>
+            </div>
+            <pre className="w-full p-2 rounded bg-background/40 border overflow-x-auto">
+              {computedFingerprint ?? "—"}
+            </pre>
+            <div className={isFingerprintValid ? "text-green-500" : "text-red-400"}>
+              {isFingerprintValid ? "Fingerprint matches parser" : "Fingerprint mismatch or invalid JSON"}
+            </div>
+          </div>
+
           {error && (
             <div className="p-3 bg-red-50 border border-red-200 rounded-md">
               <p className="text-red-800 text-sm font-medium">Error:</p>
@@ -150,21 +211,12 @@ export default function UseParserModal({ isOpen, onClose, parser }: UseParserMod
           )}
 
           {result && (
-            <div className="space-y-4">
-              <div className="p-3 bg-green-50 border border-green-200 rounded-md">
-                <p className="text-green-800 text-sm font-medium">✅ Success! Data stored in database</p>
-                <p className="text-green-700 text-sm">
-                  Client ID: {result.stored.clientId} | Order ID: {result.stored.orderId}
-                </p>
-              </div>
-
-              <div className="grid gap-3">
-                <div className="p-3 bg-gray-50 border rounded-md">
-                  <Label className="text-sm font-medium text-gray-700">Parsed Result:</Label>
-                  <pre className="mt-2 text-xs bg-white p-2 border rounded overflow-x-auto">
-                    {JSON.stringify(result.parsed, null, 2)}
-                  </pre>
-                </div>
+            <div className="grid gap-3">
+              <div className="p-3 rounded-md">
+                <Label className="text-sm font-medium">Output:</Label>
+                <pre className="mt-2 text-xs p-2 border rounded overflow-x-auto whitespace-pre-wrap">
+                  {result}
+                </pre>
               </div>
             </div>
           )}
@@ -174,10 +226,10 @@ export default function UseParserModal({ isOpen, onClose, parser }: UseParserMod
           <Button variant="outline" onClick={handleClose} disabled={isExecuting}>
             Close
           </Button>
-                              <Button
+          <Button
             onClick={executeParser}
-            disabled={isExecuting || !activeParser.code}
-            className="bg-blue-600 hover:bg-blue-700"
+            disabled={isExecuting || !activeParser.code || !isFingerprintValid}
+            className="bg-blue-600 hover:bg-blue-700 text-white"
           >
             {isExecuting ? (
               <span className="inline-flex items-center gap-2">
@@ -186,8 +238,10 @@ export default function UseParserModal({ isOpen, onClose, parser }: UseParserMod
               </span>
             ) : !activeParser.code ? (
               "No Code Available"
+              ) : !isFingerprintValid ? (
+                "Invalid payload (fingerprint)"
             ) : (
-              "Execute Parser"
+                    "Run"
             )}
           </Button>
         </DialogFooter>

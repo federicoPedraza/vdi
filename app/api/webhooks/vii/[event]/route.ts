@@ -56,10 +56,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             console.log('🚀 Would execute existing parser...');
             return NextResponse.json({
                 message: "Webhook received and processed with existing parser",
-                parserId: existingParser._id,
-                parserUuid: existingParser.uuid,
-                status: "reused",
-                fingerprint: fingerprint
             }, { status: 200 });
         }
 
