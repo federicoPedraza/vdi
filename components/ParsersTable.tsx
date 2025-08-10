@@ -20,6 +20,8 @@ import ConfirmDialog from "@/components/ConfirmDialog";
 import UseParserModal from "@/components/UseParserModal";
 import Editor from "react-simple-code-editor";
 import Prism from "prismjs";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import "prismjs/components/prism-javascript";
 import "prismjs/themes/prism-tomorrow.css";
 
@@ -49,6 +51,9 @@ interface Processing {
   error?: string;
   systemPrompt?: string;
   userPrompt?: string;
+    summary?: string;
+    summarySystemPrompt?: string;
+    summaryUserPrompt?: string;
 }
 
 export default function ParsersTable() {
@@ -108,6 +113,8 @@ export default function ParsersTable() {
   const [confirmDeleteTarget, setConfirmDeleteTarget] = useState<Parser | null>(null);
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
   const [confirmResetTarget, setConfirmResetTarget] = useState<Parser | null>(null);
+  const [logsModalOpen, setLogsModalOpen] = useState(false);
+  const [logsModalProcessing, setLogsModalProcessing] = useState<Processing | null>(null);
 
   // Floating label (rendered via portal to avoid table stacking/overflow issues)
   const [hoverLabel, setHoverLabel] = useState<{ text: string; anchor: HTMLElement } | null>(null);
@@ -338,7 +345,7 @@ export default function ParsersTable() {
     }
   };
 
-  function ParserProcessings({ parserId }: { parserId: Id<"parsers"> }) {
+  function ParserProcessings({ parserId, onOpenLogs }: { parserId: Id<"parsers">; onOpenLogs: (p: Processing) => void }) {
     const processings = useQuery(api.procedures.getProcessingsByParser, { parserId }) as Processing[] | undefined;
     const [, forceTick] = useState(0);
     const hasRunning = (processings ?? []).some((p) => !p.finishedAt);
@@ -356,6 +363,12 @@ export default function ParsersTable() {
     if (processings.length === 0) return <div className="p-2 text-sm opacity-70">No processes yet.</div>;
     
     const extendedClassName = cn("rounded-md bg-background/40 p-3", processings.length === 0 ? "border-b border-white/10" : "border-b-0");
+    const getLastLogLine = (logs: string | undefined): string => {
+      if (!logs) return "—";
+      const parts = logs.split(/\r?\n/).filter((l) => l.trim().length > 0);
+      return parts.length > 0 ? parts[parts.length - 1] : "—";
+    };
+
     return (
       <div className={extendedClassName}>
         <Table className="w-full">
@@ -366,6 +379,7 @@ export default function ParsersTable() {
               <TableHead className="font-bold uppercase underline">Start</TableHead>
               <TableHead className="font-bold uppercase underline">End</TableHead>
               <TableHead className="font-bold uppercase underline">Duration</TableHead>
+              <TableHead className="font-bold uppercase underline w-[320px]">Logs</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -384,6 +398,17 @@ export default function ParsersTable() {
                   <TableCell>{formatParseProcessingDate(proc.startedAt)}</TableCell>
                   <TableCell>{proc.finishedAt ? formatParseProcessingDate(proc.finishedAt) : "—"}</TableCell>
                   <TableCell className="whitespace-nowrap">{duration}</TableCell>
+                  <TableCell className="w-[320px] max-w-[320px]">
+                    <button
+                      type="button"
+                      onClick={() => onOpenLogs(proc)}
+                      className="text-left w-full truncate underline decoration-dotted hover:decoration-solid cursor-pointer"
+                      title={getLastLogLine(proc.logs)}
+                      aria-label="Open logs"
+                    >
+                      {getLastLogLine(proc.logs)}
+                    </button>
+                  </TableCell>
                 </TableRow>
               );
             })}
@@ -696,7 +721,7 @@ export default function ParsersTable() {
                     {expandedById[id] && (
                       <TableRow key={`${id}-details`}>
                         <TableCell colSpan={7} className="p-0">
-                          <ParserProcessings parserId={parser._id} />
+                          <ParserProcessings parserId={parser._id} onOpenLogs={(p) => { setLogsModalProcessing(p); setLogsModalOpen(true); }} />
                         </TableCell>
                       </TableRow>
                     )}
@@ -820,6 +845,65 @@ export default function ParsersTable() {
             </div>
             <div className={`text-xs text-cyan-300 transition-opacity ${didCopy ? "visible opacity-100" : "invisible opacity-0"}`}>
               Copied to clipboard
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Logs modal */}
+      <Dialog open={logsModalOpen} onOpenChange={setLogsModalOpen}>
+        <DialogContent className="sm:max-w-6xl max-h-[85vh] overflow-auto border-none">
+          <DialogHeader className="items-center">
+            <span
+              aria-hidden
+              className="inline-block w-12 h-12 text-yellow-200"
+              style={{
+                WebkitMaskImage: `url(/svg/doodles/code-logo.svg)`,
+                maskImage: `url(/svg/doodles/code-logo.svg)`,
+                WebkitMaskRepeat: "no-repeat",
+                maskRepeat: "no-repeat",
+                WebkitMaskPosition: "center",
+                maskPosition: "center",
+                WebkitMaskSize: "contain",
+                maskSize: "contain",
+                backgroundColor: "currentColor",
+              }}
+            />
+            <DialogTitle className="sr-only">Logs</DialogTitle>
+            <div className="text-xs uppercase tracking-wider opacity-80">Logs</div>
+          </DialogHeader>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="flex min-h-[420px] flex-col">
+              <div className="mb-2 text-xs uppercase tracking-wider opacity-80">LOGS</div>
+              <Editor
+                value={logsModalProcessing?.logs ?? "Not available"}
+                onValueChange={() => {}}
+                highlight={(code) => code}
+                padding={12}
+                className="rounded-md text-foreground text-sm outline-none focus:ring-2 focus:ring-cyan-500 min-h-[240px] overflow-y-auto"
+                style={{ fontFamily: '"Fira code", monospace', fontSize: 13 }}
+              />
+            </div>
+            <div className="flex min-h-[420px] flex-col">
+              <div className="mb-2 text-xs uppercase tracking-wider opacity-80">AI Summary</div>
+              {(function(){
+                const p = logsModalProcessing;
+                if (!p) return (
+                  <div className="rounded-md bg-background/40 text-foreground text-sm p-4 min-h-[240px] max-h-[60vh] overflow-auto">Not available</div>
+                );
+                if (p.status === "running") return (
+                  <div className="rounded-md bg-background/40 text-foreground text-sm p-4 min-h-[240px] max-h-[60vh] overflow-auto">Summary not available yet. Please stand by.</div>
+                );
+                if (p.status === "failed") return (
+                  <div className="rounded-md bg-background/40 text-foreground text-sm p-4 min-h-[240px] max-h-[60vh] overflow-auto">Not available</div>
+                );
+                const content = p.summary ?? "Not available";
+                return (
+                  <div className="prose prose-invert max-w-none rounded-md bg-background/40 text-foreground text-sm p-4 min-h-[240px] overflow-auto">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </DialogContent>

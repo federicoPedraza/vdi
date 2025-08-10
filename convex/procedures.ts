@@ -739,6 +739,28 @@ export const setProcessingPrompts = mutation({
   },
 });
 
+/**
+ * Save an AI-generated summary for a processing run
+ */
+export const setProcessingSummary = mutation({
+  args: {
+    processingId: v.id("parser_processings"),
+    summary: v.string(),
+    systemPrompt: v.optional(v.string()),
+    userPrompt: v.optional(v.string()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const patchUpdate: { summary: string; summarySystemPrompt?: string; summaryUserPrompt?: string } = {
+      summary: args.summary,
+    };
+    if (typeof args.systemPrompt === "string") patchUpdate.summarySystemPrompt = args.systemPrompt;
+    if (typeof args.userPrompt === "string") patchUpdate.summaryUserPrompt = args.userPrompt;
+    await ctx.db.patch(args.processingId, patchUpdate);
+    return null;
+  },
+});
+
 export const markProcessingSuccess = mutation({
   args: {
     processingId: v.id("parser_processings"),
@@ -778,6 +800,9 @@ export const getProcessingsByParser = query({
     error: v.optional(v.string()),
     systemPrompt: v.optional(v.string()),
     userPrompt: v.optional(v.string()),
+    summary: v.optional(v.string()),
+    summarySystemPrompt: v.optional(v.string()),
+    summaryUserPrompt: v.optional(v.string()),
   })),
   handler: async (ctx, args) => {
     return await ctx.db
@@ -804,6 +829,9 @@ export const getProcessingByRequestId = query({
     error: v.optional(v.string()),
     systemPrompt: v.optional(v.string()),
     userPrompt: v.optional(v.string()),
+    summary: v.optional(v.string()),
+    summarySystemPrompt: v.optional(v.string()),
+    summaryUserPrompt: v.optional(v.string()),
   }), v.null()),
   handler: async (ctx, args) => {
     const proc = await ctx.db

@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     const token = req.cookies.get("octos_session")?.value;
     if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { name, provider, openaiKey } = await req.json();
+    const { name, provider, openaiKey, summarizeProcessesWithAI } = await req.json();
     if (provider !== "openai" && provider !== "ollama") {
       return NextResponse.json({ error: "Invalid provider" }, { status: 400 });
     }
@@ -60,6 +60,7 @@ export async function POST(req: NextRequest) {
       openaiKeyCiphertext,
       openaiKeyIv,
       openaiKeyAuthTag,
+      summarizeProcessesWithAI: typeof summarizeProcessesWithAI === "boolean" ? summarizeProcessesWithAI : undefined,
     });
 
     return NextResponse.json({ ok: true, result });

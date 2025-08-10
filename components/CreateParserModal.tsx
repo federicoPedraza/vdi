@@ -14,7 +14,7 @@ import Prism from "prismjs";
 import "prismjs/components/prism-json";
 import "prismjs/themes/prism-tomorrow.css";
 
-type SchemaItem = { _id: Id<"project_schemas">; name: string; alias?: string; key?: string; color?: string; definition: unknown };
+type SchemaItem = { _id: Id<"project_schemas">; name: string; alias?: string; description?: string; key?: string; color?: string; definition: unknown };
 
 function getType(value: unknown): string {
   if (value === null) return "null";
@@ -282,7 +282,7 @@ export default function CreateParserModal({ isOpen, onClose, onCreated }: { isOp
                           </button>
                           <div className="flex items-center gap-2">
                             <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: s.color || "#ffffff" }} />
-                            <div className="text-sm">{s.alias || s.name}</div>
+                            <div className="text-sm">{s.description || s.alias || s.name}</div>
                           </div>
                         </div>
                         {isSelected && (

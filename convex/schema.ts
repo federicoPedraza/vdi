@@ -52,6 +52,10 @@ export default defineSchema({
     // Store prompts used for this processing run
     systemPrompt: v.optional(v.string()),
     userPrompt: v.optional(v.string()),
+    // Optional AI-generated summary of the parser's return fields and mapping rules
+    summary: v.optional(v.string()),
+    summarySystemPrompt: v.optional(v.string()),
+    summaryUserPrompt: v.optional(v.string()),
   })
     .index("by_parser", ["parserId"])
     .index("by_request", ["requestId"])
@@ -93,6 +97,7 @@ export default defineSchema({
     name: v.string(),
     key: v.optional(v.string()),
     alias: v.optional(v.string()),
+    description: v.optional(v.string()),
     color: v.optional(v.string()),
     definition: v.any(),
   }).index("by_project", ["projectId"]),
@@ -116,5 +121,7 @@ export default defineSchema({
     openaiKeyAuthTag: v.optional(v.string()),
     // Currently selected project for the partner (optional)
     activeProjectId: v.optional(v.id("projects")),
+    // Feature flags
+    summarizeProcessesWithAI: v.optional(v.boolean()),
   }).index("by_partner", ["partnerId"]),
 });

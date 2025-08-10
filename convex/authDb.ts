@@ -178,6 +178,7 @@ export const getPartnerSettingsByPartnerId = internalQuery({
             openaiKeyIv: v.optional(v.string()),
             openaiKeyAuthTag: v.optional(v.string()),
             activeProjectId: v.optional(v.id("projects")),
+            summarizeProcessesWithAI: v.optional(v.boolean()),
         }),
         v.null()
     ),
@@ -201,6 +202,7 @@ export const getPartnerSettingsBySession = query({
             openaiKeyIv: v.optional(v.string()),
             openaiKeyAuthTag: v.optional(v.string()),
             activeProjectId: v.optional(v.id("projects")),
+            summarizeProcessesWithAI: v.optional(v.boolean()),
         }),
         v.null()
     ),
@@ -226,6 +228,7 @@ export const upsertPartnerSettings = internalMutation({
         openaiKeyIv: v.optional(v.string()),
         openaiKeyAuthTag: v.optional(v.string()),
         activeProjectId: v.optional(v.id("projects")),
+        summarizeProcessesWithAI: v.optional(v.boolean()),
     },
     returns: v.id("partner_settings"),
     handler: async (ctx, args) => {
@@ -234,19 +237,21 @@ export const upsertPartnerSettings = internalMutation({
             .withIndex("by_partner", (q) => q.eq("partnerId", args.partnerId))
             .unique();
         if (existing) {
-            const update: Partial<{ provider: "openai" | "ollama"; openaiKeyCiphertext: string; openaiKeyIv: string; openaiKeyAuthTag: string; activeProjectId: string } > = { provider: args.provider };
+            const update: Partial<{ provider: "openai" | "ollama"; openaiKeyCiphertext: string; openaiKeyIv: string; openaiKeyAuthTag: string; activeProjectId: string; summarizeProcessesWithAI: boolean } > = { provider: args.provider };
             if (typeof args.openaiKeyCiphertext === "string") update.openaiKeyCiphertext = args.openaiKeyCiphertext;
             if (typeof args.openaiKeyIv === "string") update.openaiKeyIv = args.openaiKeyIv;
             if (typeof args.openaiKeyAuthTag === "string") update.openaiKeyAuthTag = args.openaiKeyAuthTag;
             if (args.activeProjectId) update.activeProjectId = args.activeProjectId as any;
+            if (typeof args.summarizeProcessesWithAI === "boolean") update.summarizeProcessesWithAI = args.summarizeProcessesWithAI;
             await ctx.db.patch(existing._id, update as any);
             return existing._id;
         }
-        const doc: Partial<{ partnerId: string; provider: "openai" | "ollama"; openaiKeyCiphertext?: string; openaiKeyIv?: string; openaiKeyAuthTag?: string; activeProjectId?: string }> = { partnerId: args.partnerId as any, provider: args.provider };
+        const doc: Partial<{ partnerId: string; provider: "openai" | "ollama"; openaiKeyCiphertext?: string; openaiKeyIv?: string; openaiKeyAuthTag?: string; activeProjectId?: string; summarizeProcessesWithAI?: boolean }> = { partnerId: args.partnerId as unknown as string, provider: args.provider };
         if (typeof args.openaiKeyCiphertext === "string") doc.openaiKeyCiphertext = args.openaiKeyCiphertext;
         if (typeof args.openaiKeyIv === "string") doc.openaiKeyIv = args.openaiKeyIv;
         if (typeof args.openaiKeyAuthTag === "string") doc.openaiKeyAuthTag = args.openaiKeyAuthTag;
-        if (args.activeProjectId) doc.activeProjectId = args.activeProjectId as any;
+        if (args.activeProjectId) doc.activeProjectId = args.activeProjectId as unknown as string;
+        if (typeof args.summarizeProcessesWithAI === "boolean") doc.summarizeProcessesWithAI = args.summarizeProcessesWithAI;
         return await ctx.db.insert("partner_settings", doc as any);
     },
 });
@@ -269,6 +274,7 @@ export const savePartnerSettingsForSession = mutation({
         openaiKeyIv: v.optional(v.string()),
         openaiKeyAuthTag: v.optional(v.string()),
         activeProjectId: v.optional(v.id("projects")),
+        summarizeProcessesWithAI: v.optional(v.boolean()),
     },
     returns: v.object({
         settingsId: v.id("partner_settings"),
@@ -300,19 +306,21 @@ export const savePartnerSettingsForSession = mutation({
             .unique();
         let settingsId;
         if (existing) {
-            const update: Partial<{ provider: "openai" | "ollama"; openaiKeyCiphertext: string; openaiKeyIv: string; openaiKeyAuthTag: string; activeProjectId: string }> = { provider: args.provider };
+            const update: Partial<{ provider: "openai" | "ollama"; openaiKeyCiphertext: string; openaiKeyIv: string; openaiKeyAuthTag: string; activeProjectId: string; summarizeProcessesWithAI: boolean }> = { provider: args.provider };
             if (typeof args.openaiKeyCiphertext === "string") update.openaiKeyCiphertext = args.openaiKeyCiphertext;
             if (typeof args.openaiKeyIv === "string") update.openaiKeyIv = args.openaiKeyIv;
             if (typeof args.openaiKeyAuthTag === "string") update.openaiKeyAuthTag = args.openaiKeyAuthTag;
             if (args.activeProjectId) update.activeProjectId = args.activeProjectId as any;
+            if (typeof args.summarizeProcessesWithAI === "boolean") update.summarizeProcessesWithAI = args.summarizeProcessesWithAI;
             await ctx.db.patch(existing._id, update as any);
             settingsId = existing._id;
         } else {
-            const doc: Partial<{ partnerId: string; provider: "openai" | "ollama"; openaiKeyCiphertext?: string; openaiKeyIv?: string; openaiKeyAuthTag?: string; activeProjectId?: string }> = { partnerId: partner._id as any, provider: args.provider };
+            const doc: Partial<{ partnerId: string; provider: "openai" | "ollama"; openaiKeyCiphertext?: string; openaiKeyIv?: string; openaiKeyAuthTag?: string; activeProjectId?: string; summarizeProcessesWithAI?: boolean }> = { partnerId: partner._id as unknown as string, provider: args.provider };
             if (typeof args.openaiKeyCiphertext === "string") doc.openaiKeyCiphertext = args.openaiKeyCiphertext;
             if (typeof args.openaiKeyIv === "string") doc.openaiKeyIv = args.openaiKeyIv;
             if (typeof args.openaiKeyAuthTag === "string") doc.openaiKeyAuthTag = args.openaiKeyAuthTag;
-            if (args.activeProjectId) doc.activeProjectId = args.activeProjectId as any;
+            if (args.activeProjectId) doc.activeProjectId = args.activeProjectId as unknown as string;
+            if (typeof args.summarizeProcessesWithAI === "boolean") doc.summarizeProcessesWithAI = args.summarizeProcessesWithAI;
             settingsId = await ctx.db.insert("partner_settings", doc as any);
         }
 
@@ -394,13 +402,13 @@ export const setActiveProjectForSession = mutation({
             .withIndex("by_partner", (q) => q.eq("partnerId", session.partnerId))
             .unique();
         if (existing) {
-            await ctx.db.patch(existing._id, { activeProjectId: args.projectId });
+            await ctx.db.patch(existing._id, { activeProjectId: args.projectId } as any);
         } else {
             // Default provider if none yet
             await ctx.db.insert("partner_settings", {
                 partnerId: session.partnerId,
                 provider: "ollama",
-                activeProjectId: args.projectId,
+                activeProjectId: args.projectId as any,
             } as any);
         }
         return { ok: true };
@@ -423,7 +431,7 @@ export const createProjectForSession = mutation({
             .unique();
         if (!session || session.expiresAt < Date.now()) throw new Error("Unauthorized");
 
-        const doc: any = {
+        const doc: { partnerId: string; name: string; slug?: string; description?: string } = {
             partnerId: session.partnerId,
             name: args.name.trim(),
         };
@@ -451,7 +459,7 @@ export const createProjectForSession = mutation({
         }
         if (args.description && args.description.trim()) doc.description = args.description.trim();
 
-        const projectId = await ctx.db.insert("projects", doc);
+        const projectId = await ctx.db.insert("projects", doc as any);
 
         // Optionally set as active
         if (args.makeActive) {
@@ -460,12 +468,12 @@ export const createProjectForSession = mutation({
                 .withIndex("by_partner", (q) => q.eq("partnerId", session.partnerId))
                 .unique();
             if (existing) {
-                await ctx.db.patch(existing._id, { activeProjectId: projectId });
+                await ctx.db.patch(existing._id, { activeProjectId: projectId } as any);
             } else {
                 await ctx.db.insert("partner_settings", {
                     partnerId: session.partnerId,
                     provider: "ollama",
-                    activeProjectId: projectId,
+                    activeProjectId: projectId as any,
                 } as any);
             }
         }
@@ -486,6 +494,7 @@ export const listSchemasByActiveProject = query({
             name: v.string(),
             key: v.optional(v.string()),
             alias: v.optional(v.string()),
+            description: v.optional(v.string()),
             color: v.optional(v.string()),
             definition: v.any(),
         })
@@ -516,6 +525,7 @@ export const upsertSchemaByName = mutation({
         definition: v.any(),
         key: v.optional(v.string()),
         alias: v.optional(v.string()),
+        description: v.optional(v.string()),
         color: v.optional(v.string()),
     },
     returns: v.object({ schemaId: v.id("project_schemas") }),
@@ -530,7 +540,7 @@ export const upsertSchemaByName = mutation({
             .withIndex("by_partner", (q) => q.eq("partnerId", session.partnerId))
             .unique();
         if (!settings?.activeProjectId) throw new Error("No active project");
-        const projectId = settings.activeProjectId as any;
+        const projectId = settings.activeProjectId;
 
         // Find by name within project
         const existing = (await ctx.db
@@ -538,9 +548,10 @@ export const upsertSchemaByName = mutation({
             .withIndex("by_project", (q) => q.eq("projectId", projectId))
             .collect()).find((s) => s.name === args.name);
 
-        const updateFields: Partial<{ definition: unknown; key?: string; alias?: string; color?: string }> = { definition: args.definition };
+        const updateFields: Partial<{ definition: unknown; key?: string; alias?: string; description?: string; color?: string }> = { definition: args.definition };
         if (typeof args.key === "string") updateFields.key = args.key;
         if (typeof args.alias === "string") updateFields.alias = args.alias;
+        if (typeof args.description === "string") updateFields.description = args.description;
         if (typeof args.color === "string") updateFields.color = args.color;
 
         if (existing) {
@@ -548,13 +559,14 @@ export const upsertSchemaByName = mutation({
             return { schemaId: existing._id };
         }
         const schemaId = await ctx.db.insert("project_schemas", {
-            projectId: projectId as any,
+            projectId: projectId,
             name: args.name,
             key: args.key,
             alias: args.alias,
+            description: args.description,
             color: args.color,
             definition: args.definition,
-        } as any);
+        });
         return { schemaId };
     },
 });
@@ -687,7 +699,7 @@ export const getAssignedSchemasForParser = query({
             if (!schemaDoc) continue;
             const def = (schemaDoc as any).definition;
             const schemaString = typeof def === "string" ? def : JSON.stringify(def ?? {}, null, 2);
-            const description = (schemaDoc as any).alias || (schemaDoc as any).key || (schemaDoc as any).name;
+            const description = (schemaDoc as any).description || (schemaDoc as any).alias || (schemaDoc as any).key || (schemaDoc as any).name;
             const asArray = (a as any).asArray === true;
             const key = (schemaDoc as any).key;
             results.push({ name: (schemaDoc as any).name, schema: schemaString, description, asArray, key });

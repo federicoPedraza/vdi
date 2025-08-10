@@ -10,6 +10,11 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import CreateParserModal from "@/components/CreateParserModal";
 // Project list/selection is fetched via Next API to use httpOnly cookie
+import Editor from "react-simple-code-editor";
+import Prism from "prismjs";
+import "prismjs/components/prism-json";
+import "prismjs/components/prism-javascript";
+import "prismjs/themes/prism-tomorrow.css";
 
 export default function Home() {
   const schemaColorPalette: Array<string> = [
@@ -29,7 +34,7 @@ export default function Home() {
     "#f43f5e",
   ];
   const [partner, setPartner] = useState<{ name: string } | null>(null);
-  const [settings, setSettings] = useState<{ provider: "openai" | "ollama" } | null>(null);
+  const [settings, setSettings] = useState<{ provider: "openai" | "ollama"; summarizeProcessesWithAI?: boolean } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [projectPromptOpen, setProjectPromptOpen] = useState(false);
   const [createPromptOpen, setCreatePromptOpen] = useState(false);
@@ -50,7 +55,7 @@ export default function Home() {
     const load = async () => {
       try {
         const res = await fetch("/api/auth/me", { method: "GET" });
-        const data = (await res.json()) as { partner: { name: string } | null; settings: { provider: "openai" | "ollama" } | null };
+        const data = (await res.json()) as { partner: { name: string } | null; settings: { provider: "openai" | "ollama"; summarizeProcessesWithAI?: boolean } | null };
         if (!cancelled) {
           setPartner(data.partner);
           setSettings(data.settings);
@@ -130,9 +135,142 @@ export default function Home() {
   const projectOptions = useMemo(() => (projects ?? []).map((p: { _id: string; name: string }) => ({ id: p._id, name: p.name })), [projects]);
   const [manageProjectsOpen, setManageProjectsOpen] = useState(false);
   const [schemasOpen, setSchemasOpen] = useState(false);
-  const [schemas, setSchemas] = useState<Array<{ _id: string; name: string; key?: string; alias?: string; color?: string; definition: string }>>([]);
+  const [schemas, setSchemas] = useState<Array<{ _id: string; name: string; key?: string; alias?: string; description?: string; color?: string; definition: string }>>([]);
   const [schemaDraft, setSchemaDraft] = useState<{ name: string; alias: string; color: string; key: string; definition: string }>({ name: "", alias: "", color: "#ffffff", key: "", definition: "{\n  \"type\": \"object\"\n}" });
   const [createParserOpen, setCreateParserOpen] = useState(false);
+  const [schemaDescriptions, setSchemaDescriptions] = useState<string>("{\n}\n");
+  const [descriptionsDirty, setDescriptionsDirty] = useState<boolean>(false);
+  const [tryParseFailed, setTryParseFailed] = useState<boolean>(false);
+  const tryParseBtnRef = useRef<HTMLButtonElement | null>(null);
+
+  function extractInlineCommentsFromDefinition(definitionSource: string): Record<string, string> {
+    const result: Record<string, string> = {};
+    const lines = definitionSource.split(/\r?\n/);
+    // Matches keys like "key", 'key', or bare key and captures trailing // comment
+    const pattern = /(?:\"([^\"\\]+)\"|'([^'\\]+)'|([A-Za-z_][\w-]*))\s*:\s*[^\n,]*?(?:,)?\s*\/\/\s*(.+)$/;
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      const match = line.match(pattern);
+      if (match) {
+        const key = (match[1] || match[2] || match[3] || "").trim();
+        const comment = (match[4] || "").trim();
+        if (key && comment) result[key] = comment;
+      }
+    }
+    return result;
+  }
+
+  // Auto-populate descriptions from inline comments unless user edited descriptions manually
+  useEffect(() => {
+    if (descriptionsDirty) return;
+    const mapping = extractInlineCommentsFromDefinition(schemaDraft.definition);
+    const pretty = JSON.stringify(mapping, null, 2);
+    setSchemaDescriptions(pretty);
+  }, [schemaDraft.definition, descriptionsDirty]);
+
+  // Helper: strip // and /* */ comments while preserving strings
+  function stripCommentsPreservingStrings(src: string): string {
+    let out = "";
+    let inString = false;
+    let stringChar: '"' | "'" | null = null;
+    for (let i = 0; i < src.length; ) {
+      const ch = src[i];
+      const next = i + 1 < src.length ? src[i + 1] : '';
+      const prev = i > 0 ? src[i - 1] : '';
+      if (!inString) {
+        if (ch === '"' || ch === "'") {
+          inString = true;
+          stringChar = ch as '"' | "'";
+          out += ch;
+          i += 1;
+          continue;
+        }
+        if (ch === '/' && next === '/') {
+          while (i < src.length && src[i] !== '\n') i += 1;
+          out += '\n';
+          continue;
+        }
+        if (ch === '/' && next === '*') {
+          i += 2;
+          while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) i += 1;
+          i += 2;
+          continue;
+        }
+        out += ch;
+        i += 1;
+      } else {
+        out += ch;
+        if (ch === stringChar && prev !== '\\') {
+          inString = false;
+          stringChar = null;
+        }
+        i += 1;
+      }
+    }
+    return out;
+  }
+
+  const isDefinitionValidJson = useMemo(() => {
+    try {
+      const stripped = stripCommentsPreservingStrings(schemaDraft.definition);
+      JSON.parse(stripped);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [schemaDraft.definition]);
+
+  function convertTypeScriptObjectToJson(src: string): string | null {
+    let firstJsonError: unknown = null;
+    try {
+      // Fast path: already JSON
+      const stripped = stripCommentsPreservingStrings(src);
+      try {
+        const already = JSON.parse(stripped);
+        return JSON.stringify(already, null, 2);
+      } catch (e) {
+        firstJsonError = e;
+      }
+
+      let s = stripped;
+      // If it's a type/interface declaration, extract the object literal between the outermost braces
+      if (!/^\s*\{[\s\S]*\}\s*$/.test(s)) {
+        const firstBrace = s.indexOf('{');
+        const lastBrace = s.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace > firstBrace) {
+          s = s.slice(firstBrace, lastBrace + 1);
+        }
+      }
+      // Normalize line endings
+      s = s.replace(/\r\n?/g, '\n');
+      // Convert TypeScript semicolons to commas first so subsequent keys are preceded by ','
+      s = s.replace(/;/g, ',');
+      // Quote unquoted keys (supports beginning of line) and drop optional marker
+      s = s.replace(/(^|[,{]\s*)([A-Za-z_][\w-]*)(\?)?\s*:/gm, '$1"$2":');
+      // Replace primitive type annotations with their type-name strings
+      s = s.replace(/:\s*string(\s*[;,\n}])/g, ': "string"$1');
+      s = s.replace(/:\s*number(\s*[;,\n}])/g, ': "number"$1');
+      s = s.replace(/:\s*boolean(\s*[;,\n}])/g, ': "boolean"$1');
+      s = s.replace(/:\s*(any|unknown|undefined)(\s*[;,\n}])/g, ': "$1"$2');
+      s = s.replace(/:\s*null(\s*[;,\n}])/g, ': "null"$1');
+      // Arrays like string[] -> ["string"]
+      s = s.replace(/:\s*([A-Za-z_][\w-]*)\[\](\s*[;,\n}])/g, ': ["$1"]$2');
+      // Basic object literal value without nested conversion: foo: { ... } -> foo: { }
+      s = s.replace(/:\s*\{[\s\S]*?\}(\s*[;,\n}])/g, ': { }$1');
+      // Remove trailing commas before } or ]
+      s = s.replace(/,(\s*[}\]])/g, '$1');
+      // Try parse
+      const parsed = JSON.parse(s);
+      return JSON.stringify(parsed, null, 2);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const firstMsg = firstJsonError instanceof Error ? firstJsonError.message : firstJsonError ? String(firstJsonError) : undefined;
+      // Keep logs concise with previews
+      const preview = (src || '').slice(0, 280);
+      console.error("Try parse failed", { message: msg, firstJsonAttemptError: firstMsg, inputPreview: preview });
+      return null;
+    }
+  }
 
   return (
     <>
@@ -466,9 +604,10 @@ export default function Home() {
         onClose={() => setSettingsOpen(false)}
         initialName={partner?.name ?? ""}
         initialProvider={settings?.provider ?? "ollama"}
+        initialSummarize={settings?.summarizeProcessesWithAI ?? false}
         onUpdated={(next) => {
           setPartner((p) => (p ? { ...p, name: next.name } : p));
-          setSettings({ provider: next.provider });
+          setSettings({ provider: next.provider, summarizeProcessesWithAI: next.summarize });
         }}
       />
 
@@ -526,6 +665,20 @@ export default function Home() {
                                   key: s.key || "",
                                   definition: defString,
                                 });
+                                // Hydrate descriptions editor from saved description if it's JSON, otherwise from inline comments
+                                try {
+                                  if (s.description) {
+                                    const parsed = JSON.parse(s.description);
+                                    setSchemaDescriptions(JSON.stringify(parsed, null, 2));
+                                  } else {
+                                    const mapping = extractInlineCommentsFromDefinition(defString);
+                                    setSchemaDescriptions(JSON.stringify(mapping, null, 2));
+                                  }
+                                } catch {
+                                  const mapping = extractInlineCommentsFromDefinition(defString);
+                                  setSchemaDescriptions(JSON.stringify(mapping, null, 2));
+                                }
+                                setDescriptionsDirty(false);
                               }}
                             >
                               Inspect
@@ -566,12 +719,12 @@ export default function Home() {
                     <Input id="schema-name" value={schemaDraft.name} onChange={(e: ChangeEvent<HTMLInputElement>) => setSchemaDraft((d) => ({ ...d, name: e.target.value }))} placeholder="orders" />
                   </div>
                   <div className="grid gap-1">
-                    <Label htmlFor="schema-alias">Alias</Label>
+                    <Label htmlFor="schema-alias">Alias (optional)</Label>
                     <Input id="schema-alias" value={schemaDraft.alias} onChange={(e: ChangeEvent<HTMLInputElement>) => setSchemaDraft((d) => ({ ...d, alias: e.target.value }))} placeholder="Orders" />
                   </div>
                   <div className="grid gap-1">
                     <Label htmlFor="schema-color">Color</Label>
-                    <div id="schema-color" className="flex flex-wrap gap-2 pt-1">
+                    <div id="schema-color" className="flex gap-2 pt-1 overflow-x-auto whitespace-nowrap no-scrollbar">
                       {schemaColorPalette.map((c) => (
                         <button
                           key={c}
@@ -579,7 +732,7 @@ export default function Home() {
                           aria-label={`Choose color ${c}`}
                           aria-pressed={schemaDraft.color === c}
                           onClick={() => setSchemaDraft((d) => ({ ...d, color: c }))}
-                          className="w-6 h-6 rounded-sm border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/70"
+                          className="w-6 h-6 rounded-sm border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/70 shrink-0"
                           style={{ backgroundColor: c, boxShadow: schemaDraft.color === c ? "0 0 0 2px rgba(255,255,255,0.9)" : undefined }}
                         />
                       ))}
@@ -590,13 +743,86 @@ export default function Home() {
                     <Input id="schema-key" value={schemaDraft.key} onChange={(e: ChangeEvent<HTMLInputElement>) => setSchemaDraft((d) => ({ ...d, key: e.target.value }))} placeholder="order" />
                   </div>
                   <div className="grid gap-1 col-span-2">
-                    <Label htmlFor="schema-definition">Definition (JSON)</Label>
-                    <textarea
-                      id="schema-definition"
-                      className="w-full h-56 bg-transparent border border-white/20 p-2 text-sm font-mono"
-                      value={schemaDraft.definition}
-                      onChange={(e) => setSchemaDraft((d) => ({ ...d, definition: e.target.value }))}
-                    />
+                    <div className="flex items-center justify-between gap-2">
+                      <Label htmlFor="schema-definition">Definition (JSON)</Label>
+                      <Button
+                        ref={tryParseBtnRef}
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className={tryParseFailed ? "bg-red-600 text-white hover:bg-red-600/90" : undefined}
+                        disabled={isDefinitionValidJson || tryParseFailed}
+                        aria-invalid={tryParseFailed || undefined}
+                        onClick={() => {
+                          const converted = convertTypeScriptObjectToJson(schemaDraft.definition);
+                          if (converted) {
+                            setSchemaDraft((d) => ({ ...d, definition: converted }));
+                            setTryParseFailed(false);
+                          } else {
+                            setTryParseFailed(true);
+                            tryParseBtnRef.current?.animate(
+                              [
+                                { transform: 'translateX(0)' },
+                                { transform: 'translateX(-6px)' },
+                                { transform: 'translateX(6px)' },
+                                { transform: 'translateX(-4px)' },
+                                { transform: 'translateX(4px)' },
+                                { transform: 'translateX(0)' },
+                              ],
+                              { duration: 300, easing: 'ease-in-out' }
+                            );
+                          }
+                        }}
+                        title={isDefinitionValidJson ? 'Definition is already valid JSON' : (tryParseFailed ? 'Failed to parse. Edit the definition to try again.' : 'Convert TypeScript-like object to JSON')}
+                      >
+                        Try parse
+                      </Button>
+                    </div>
+                    <div className="flex flex-col gap-1 min-w-0">
+                      <Editor
+                        id="schema-definition"
+                        value={schemaDraft.definition}
+                        onValueChange={(code) => {
+                          setSchemaDraft((d) => ({ ...d, definition: code }));
+                          // If user edits, clear error state so button re-enables
+                          if (tryParseFailed) setTryParseFailed(false);
+                        }}
+                        highlight={(code) => Prism.highlight(code, Prism.languages.javascript, "javascript")}
+                        padding={10}
+                        className="w-full border border-white/20 rounded-md font-mono text-sm bg-transparent"
+                        style={{
+                          fontFamily: '"Fira code", monospace',
+                          fontSize: 14,
+                          width: "100%",
+                          maxWidth: "100%",
+                          minHeight: 224,
+                          maxHeight: 320,
+                          overflow: "auto",
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid gap-1 col-span-2">
+                    <Label htmlFor="schema-descriptions">Descriptions (auto from comments)</Label>
+                    <div className="flex flex-col gap-1 min-w-0">
+                      <Editor
+                        id="schema-descriptions"
+                        value={schemaDescriptions}
+                        onValueChange={(code) => { setSchemaDescriptions(code); setDescriptionsDirty(true); }}
+                        highlight={(code) => Prism.highlight(code, Prism.languages.json, "json")}
+                        padding={10}
+                        className="w-full border border-white/20 rounded-md font-mono text-sm bg-transparent"
+                        style={{
+                          fontFamily: '"Fira code", monospace',
+                          fontSize: 14,
+                          width: "100%",
+                          maxWidth: "100%",
+                          minHeight: 160,
+                          maxHeight: 240,
+                          overflow: "auto",
+                        }}
+                      />
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-center justify-end gap-2">
@@ -609,11 +835,12 @@ export default function Home() {
                         const res = await fetch("/api/partner/schemas", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({
+                            body: JSON.stringify({
                             name: schemaDraft.name.trim(),
                             definition: schemaDraft.definition,
                             key: schemaDraft.key || undefined,
                             alias: schemaDraft.alias || undefined,
+                              description: (() => { try { return JSON.stringify(JSON.parse(schemaDescriptions)); } catch { return JSON.stringify({}); } })(),
                             color: schemaDraft.color || "#ffffff",
                           }),
                         });
@@ -758,13 +985,15 @@ function SettingsModal({
   onClose,
   initialName,
   initialProvider,
+  initialSummarize,
   onUpdated,
 }: {
   isOpen: boolean;
   onClose: () => void;
   initialName: string;
   initialProvider: "openai" | "ollama";
-  onUpdated: (v: { name: string; provider: "openai" | "ollama" }) => void;
+  initialSummarize: boolean;
+  onUpdated: (v: { name: string; provider: "openai" | "ollama"; summarize: boolean }) => void;
 }) {
   const [name, setName] = useState(initialName);
   const [provider, setProvider] = useState<"openai" | "ollama">(initialProvider);
@@ -772,6 +1001,7 @@ function SettingsModal({
   const [error, setError] = useState<string | null>(null);
   const [initialLoading, setInitialLoading] = useState(false);
   const [openaiKey, setOpenaiKey] = useState("");
+  const [summarize, setSummarize] = useState<boolean>(initialSummarize);
 
   // keep inputs in sync when opening with newer values
   useEffect(() => {
@@ -784,10 +1014,11 @@ function SettingsModal({
       try {
         setInitialLoading(true);
         const res = await fetch("/api/auth/me", { method: "GET" });
-        const data = (await res.json()) as { partner: { name: string } | null; settings: { provider: "openai" | "ollama" } | null };
+        const data = (await res.json()) as { partner: { name: string } | null; settings: { provider: "openai" | "ollama"; summarizeProcessesWithAI?: boolean } | null };
         if (!cancelled) {
           if (data.partner?.name) setName(data.partner.name);
           if (data.settings?.provider) setProvider(data.settings.provider);
+          if (typeof data.settings?.summarizeProcessesWithAI === "boolean") setSummarize(data.settings.summarizeProcessesWithAI);
           // We never populate the OpenAI key back into the UI for security; leave empty
         }
       } catch {
@@ -807,11 +1038,11 @@ function SettingsModal({
       const res = await fetch("/api/partner/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, provider, openaiKey: provider === "openai" ? openaiKey : undefined }),
+        body: JSON.stringify({ name, provider, openaiKey: provider === "openai" ? openaiKey : undefined, summarizeProcessesWithAI: summarize }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Failed to save settings");
-      onUpdated({ name, provider });
+      onUpdated({ name, provider, summarize });
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
@@ -830,7 +1061,6 @@ function SettingsModal({
         {initialLoading ? (
           <div className="flex flex-col items-center justify-center py-10 gap-3">
             <Spinner size={24} aria-label="Loading settings" />
-            <div className="text-sm opacity-80">Loading…</div>
           </div>
         ) : (
           <>
@@ -879,6 +1109,12 @@ function SettingsModal({
                   <div className="text-xs opacity-70">Stored encrypted on the server. It is never shown again.</div>
                 </div>
               )}
+              <div className="grid gap-2">
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={summarize} onChange={(e) => setSummarize(e.target.checked)} disabled={saving} />
+                  Summarize processes with AI
+                </label>
+              </div>
               {error && <div className="text-red-400 text-sm">{error}</div>}
             </div>
             <DialogFooter>

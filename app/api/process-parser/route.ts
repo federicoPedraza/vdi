@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import { Ollama } from "ollama";
 import OpenAI from "openai";
 import { createDecipheriv, createHash } from "crypto";
@@ -16,12 +17,13 @@ type ProcessLogger = {
 };
 
 type ModelProvider = "ollama" | "openai";
-type GenerationOptions = {
-  provider?: ModelProvider;
-  openaiModel?: string;
-  ollamaModel?: string;
-  openaiApiKey?: string;
-};
+// Reserved for future explicit options typing
+// type GenerationOptions = {
+//   provider?: ModelProvider;
+//   openaiModel?: string;
+//   ollamaModel?: string;
+//   openaiApiKey?: string;
+// };
 
 // (helper removed; prompts built inline in POST handler)
 
@@ -228,6 +230,91 @@ async function generateWithOpenAI(args: {
   return { code: generatedCode };
 }
 
+async function generateSummaryWithOpenAIConversation(args: {
+  systemPrompt: string;
+  userPrompt: string;
+  followupPrompt: string;
+  logger: ProcessLogger;
+  model?: string;
+  apiKey: string;
+}): Promise<{ summary: string; firstAnswer: string }> {
+  const { systemPrompt, userPrompt, followupPrompt, logger, model, apiKey } = args;
+  if (!apiKey) {
+    throw new Error("OpenAI API key is not set");
+  }
+  const openai = new OpenAI({ apiKey });
+  const chosenModel = model || "gpt-4o-mini";
+
+  await logger.log(`🧠 Selected OpenAI model (summary convo): ${chosenModel}`);
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userPrompt },
+  ];
+
+  // First turn
+  await logger.log("🗣️ Generating initial summary (turn 1)");
+  const resp1 = await openai.chat.completions.create({
+    model: chosenModel,
+    temperature: 0.1,
+    messages,
+  });
+  const firstAnswer = (resp1.choices?.[0]?.message?.content || "").trim();
+  if (!firstAnswer) throw new Error("Empty summary from first turn");
+  messages.push({ role: "assistant", content: firstAnswer });
+
+  // Follow-up turn to refine
+  messages.push({ role: "user", content: followupPrompt });
+  await logger.log("🔁 Refining summary (turn 2 with conversation context)");
+  const resp2 = await openai.chat.completions.create({
+    model: chosenModel,
+    temperature: 0.1,
+    messages,
+  });
+  const secondAnswer = (resp2.choices?.[0]?.message?.content || "").trim();
+  if (!secondAnswer) throw new Error("Empty summary from second turn");
+
+  return { summary: secondAnswer, firstAnswer };
+}
+
+async function generateSummaryWithOllamaConversation(args: {
+  systemPrompt: string;
+  userPrompt: string;
+  followupPrompt: string;
+  logger: ProcessLogger;
+  preferredModel?: string;
+}): Promise<{ summary: string; firstAnswer: string }> {
+  const { systemPrompt, userPrompt, followupPrompt, logger, preferredModel } = args;
+
+  const ollamaHost = process.env.OLLAMA_HOST || "http://localhost:11434";
+  const ollama = new Ollama({ host: ollamaHost });
+  const model = preferredModel || process.env.OLLAMA_MODEL || "qwen2.5-coder:7b";
+
+  await logger.log(`🧠 Selected Ollama model (summary convo): ${model}`);
+
+  const baseMessages = [
+    { role: "system" as const, content: systemPrompt },
+    { role: "user" as const, content: userPrompt },
+  ];
+
+  await logger.log("🗣️ Generating initial summary (turn 1, ollama)");
+  const resp1 = await ollama.chat({ model, messages: baseMessages, options: { temperature: 0.1 } });
+  const firstAnswer = (resp1?.message?.content || "").trim();
+  if (!firstAnswer) throw new Error("Empty summary from first turn (ollama)");
+
+  const messages2 = [
+    ...baseMessages,
+    { role: "assistant" as const, content: firstAnswer },
+    { role: "user" as const, content: followupPrompt },
+  ];
+
+  await logger.log("🔁 Refining summary (turn 2 with conversation context, ollama)");
+  const resp2 = await ollama.chat({ model, messages: messages2, options: { temperature: 0.1 } });
+  const secondAnswer = (resp2?.message?.content || "").trim();
+  if (!secondAnswer) throw new Error("Empty summary from second turn (ollama)");
+
+  return { summary: secondAnswer, firstAnswer };
+}
+
 // Configure API route timeout (10 minutes for parser generation)
 export const maxDuration = 600; // 10 minutes in seconds
 
@@ -237,7 +324,6 @@ export async function POST(request: NextRequest) {
   let currentStep = 1;
   let processingId: string | null = null;
   let preProcessingLogBuffer = "";
-  const TOTAL_STEPS = 9;
 
   let convexParserId: string | null = null;
   let failureMarked = false;
@@ -248,7 +334,7 @@ export async function POST(request: NextRequest) {
     try {
       const idToFail = convexParserId;
       if (idToFail) {
-        await convex.mutation(api.procedures.updateParserFailedPublic, { parserId: idToFail });
+        await convex.mutation(api.procedures.updateParserFailedPublic, { parserId: (idToFail as unknown as Id<"parsers">) });
       }
     } catch (e) {
       console.error("Failed to mark parser failed:", (e as Error)?.message);
@@ -256,7 +342,7 @@ export async function POST(request: NextRequest) {
     try {
       if (processingId) {
         await convex.mutation(api.procedures.markProcessingFailed, {
-          processingId: processingId,
+          processingId: (processingId as unknown as Id<"parser_processings">),
           error: reason || "Request aborted",
         });
       }
@@ -286,17 +372,18 @@ export async function POST(request: NextRequest) {
     log: async (message: string) => {
       console.log(message);
       if (processingId) {
-        await convex.mutation(api.procedures.appendProcessingLog, { processingId: processingId, step: currentStep, message });
+        await convex.mutation(api.procedures.appendProcessingLog, { processingId: (processingId as unknown as Id<"parser_processings">), step: currentStep, message });
       }
     },
     error: async (message: string) => {
       console.error(message);
       if (processingId) {
-        await convex.mutation(api.procedures.appendProcessingLog, { processingId: processingId, step: currentStep, message });
+        await convex.mutation(api.procedures.appendProcessingLog, { processingId: (processingId as unknown as Id<"parser_processings">), step: currentStep, message });
       }
     }
   } as ProcessLogger);
   let logger: ProcessLogger | null = null;
+  let summarizeWithAI = false;
 
   try {
     bufferLog(`📥 [${new Date().toISOString()}] Parsing request body...`);
@@ -325,6 +412,7 @@ export async function POST(request: NextRequest) {
         if (settings?.provider === "openai" || settings?.provider === "ollama") {
           partnerProvider = settings.provider as ModelProvider;
         }
+        summarizeWithAI = settings?.summarizeProcessesWithAI === true;
         // If provider is OpenAI and encrypted key fields are present, decrypt with server key
         if (settings?.provider === "openai" && settings?.openaiKeyCiphertext && settings?.openaiKeyIv && settings?.openaiKeyAuthTag) {
           const secret = process.env.ENCRYPTION_KEY;
@@ -370,11 +458,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Create processing row now that we have a parser ID
+    // Compute total steps dynamically: base + 1 if summary is enabled
+    const baseSteps = 9;
+    const totalSteps = baseSteps + (summarizeWithAI ? 1 : 0);
     const createdProcessingId = await convex.mutation(api.procedures.startParserProcessing, {
       parserId: parser._id,
       requestId,
       initialStep: currentStep,
-      totalSteps: TOTAL_STEPS,
+      totalSteps,
       initialLogs: preProcessingLogBuffer,
     });
     processingId = createdProcessingId;
@@ -417,9 +508,9 @@ export async function POST(request: NextRequest) {
       // Fetch assigned schemas for this parser to steer generation
       let schemasForPrompt: BuildSystemPromptSchema[] = [];
       try {
-        const items = await convex.query(api.authDb.getAssignedSchemasForParser, { parserId });
+        const items = await convex.query(api.authDb.getAssignedSchemasForParser, { parserId: parser._id as unknown as Id<"parsers"> });
         if (Array.isArray(items)) {
-          schemasForPrompt = items.map((s: any) => ({
+          schemasForPrompt = items.map((s: { name: string; schema: string; description: string; asArray?: boolean; key?: string }) => ({
             name: s.name,
             schema: s.schema,
             description: s.description,
@@ -429,25 +520,23 @@ export async function POST(request: NextRequest) {
         }
       } catch { /* ignore */ }
 
-      const generated = await (async () => {
-        const startTime = Date.now();
-        logger!.setStep(4);
-        // Rebuild prompts with schemas, if available
-        const buildSchemas: BuildSystemPromptSchema[] = schemasForPrompt;
-        const systemPrompt = buildSystemPrompt(buildSchemas);
-        const userPrompt = buildUserPrompt(parser.event, simplifyPayload(originalPayload), "javascript", buildSchemas);
-        await logger!.log(`📝 [${new Date().toISOString()}] Prompts prepared with ${buildSchemas.length} schema(s)`);
-        await logger!.log(`System prompt length: ${systemPrompt.length} characters`);
-        await logger!.log(`User prompt length: ${userPrompt.length} characters`);
-        await logger!.log(`Preparation time: ${Date.now() - startTime}ms`);
-        return await ((async () => {
-          const provider: ModelProvider = (providerOverride as ModelProvider) || partnerProvider || "ollama";
-          return provider === "openai"
-            ? await generateWithOpenAI({ systemPrompt, userPrompt, logger: logger!, model: openaiModel, apiKey: partnerOpenAIApiKey || "" })
-            : await generateWithOllama({ systemPrompt, userPrompt, logger: logger!, preferredModel: ollamaModel });
-        })());
+      const startTime = Date.now();
+      logger!.setStep(4);
+      // Rebuild prompts with schemas, if available
+      const buildSchemas: BuildSystemPromptSchema[] = schemasForPrompt;
+      const systemPrompt = buildSystemPrompt(buildSchemas);
+      const userPrompt = buildUserPrompt(parser.event, simplifyPayload(originalPayload), "javascript", buildSchemas);
+      await logger!.log(`📝 [${new Date().toISOString()}] Prompts prepared with ${buildSchemas.length} schema(s)`);
+      await logger!.log(`System prompt length: ${systemPrompt.length} characters`);
+      await logger!.log(`User prompt length: ${userPrompt.length} characters`);
+      await logger!.log(`Preparation time: ${Date.now() - startTime}ms`);
+      const generatedResp = await (async () => {
+        const provider: ModelProvider = (providerOverride as ModelProvider) || partnerProvider || "ollama";
+        return provider === "openai"
+          ? await generateWithOpenAI({ systemPrompt, userPrompt, logger: logger!, model: openaiModel, apiKey: partnerOpenAIApiKey || "" })
+          : await generateWithOllama({ systemPrompt, userPrompt, logger: logger!, preferredModel: ollamaModel });
       })();
-      const generatedCode = generated.code;
+      const generatedCode = generatedResp.code;
       const codeGenTime = Date.now() - codeGenStartTime;
       await logger.log(`🎉 AI code generation completed in ${codeGenTime}ms`);
 
@@ -455,9 +544,9 @@ export async function POST(request: NextRequest) {
       if (processingId) {
         try {
           await convex.mutation(api.procedures.setProcessingPrompts, {
-            processingId: processingId,
-            systemPrompt: generated.systemPrompt,
-            userPrompt: generated.userPrompt,
+            processingId: (processingId as unknown as Id<"parser_processings">),
+            systemPrompt,
+            userPrompt,
           });
         } catch (e) {
           // Non-fatal
@@ -483,11 +572,12 @@ export async function POST(request: NextRequest) {
       await logger.log(`🚀 Executing parser function...`);
       const executionStartTime = Date.now();
       const result = parseFunction(originalPayload, {
-        success: (r: unknown) => {
-          try { logger?.log(`✅ exec.success callback invoked`).catch(() => {}); } catch {}
+        success: () => {
+          try { void logger?.log(`✅ exec.success callback invoked`); } catch {}
         },
-        fail: (e: unknown) => {
-          try { logger?.error(`⚠️ exec.fail callback invoked: ${e instanceof Error ? e.message : String(e)}`).catch(() => {}); } catch {}
+        fail: (err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          try { void logger?.error(`⚠️ exec.fail callback invoked: ${msg}`); } catch {}
         },
       });
       const executionTime = Date.now() - executionStartTime;
@@ -542,7 +632,81 @@ export async function POST(request: NextRequest) {
         await logger.log(`- Code save: ${codeSaveTime}ms`);
         await logger.log(`- Final processing: ${finalProcessingTime}ms`);
 
-        await convex.mutation(api.procedures.markProcessingSuccess, { processingId: processingId });
+        await convex.mutation(api.procedures.markProcessingSuccess, { processingId: (processingId as unknown as Id<"parser_processings">) });
+
+        // Optionally run a second AI pass to summarize the generated parser's return fields
+        if (summarizeWithAI) {
+          logger.setStep(10);
+          await logger.log(`\n🧾 Generating AI summary of return fields...`);
+          try {
+            // Prepare summarization prompts
+            const summarySystemPrompt = [
+              "You are a senior integrations engineer.",
+              "Given parser code and its execution result for a webhook payload, explain clearly:",
+              "1) What the return fields represent and what they are based on in the original payload or schemas.",
+              "2) Which rule/logic was used to derive each field (mapping, transformation, defaulting), if applicable.",
+              "Keep it concise and helpful for business stakeholders.",
+            ].join(" ");
+
+            const safeResult = (() => {
+              try { return JSON.stringify(filterNullValues(result), null, 2); } catch { return "<unserializable>"; }
+            })();
+            const safePayload = (() => {
+              try { return JSON.stringify(simplifyPayload(originalPayload), null, 2); } catch { return "<unserializable>"; }
+            })();
+            const summaryUserPrompt = [
+              "Parser generated code:",
+              "```javascript\n" + sanitizeGeneratedCode(generatedCode) + "\n```",
+              "\nOriginal simplified payload sample:",
+              "```json\n" + safePayload + "\n```",
+              "\nExecution result from the parser (the fields to explain):",
+              "```json\n" + safeResult + "\n```",
+              "\nExplain each top-level field's origin and rule.",
+            ].join("\n");
+
+            const provider: ModelProvider = (providerOverride as ModelProvider) || partnerProvider || "ollama";
+            let summaryText = "";
+            const followupPrompt = [
+              "Please refine the previous explanation:",
+              "- Make it concise and business-friendly.",
+              "- Use bullet points, one per top-level field.",
+              "- For each field include: 'from:' the payload/source and 'rule:' the mapping/transformation.",
+              "- Avoid code blocks unless strictly needed.",
+            ].join("\n");
+            if (provider === "openai") {
+              const resp = await generateSummaryWithOpenAIConversation({
+                systemPrompt: summarySystemPrompt,
+                userPrompt: summaryUserPrompt,
+                followupPrompt,
+                logger: logger!,
+                model: openaiModel,
+                apiKey: partnerOpenAIApiKey || "",
+              });
+              summaryText = stripCodeFences(resp.summary).trim();
+            } else {
+              const resp = await generateSummaryWithOllamaConversation({
+                systemPrompt: summarySystemPrompt,
+                userPrompt: summaryUserPrompt,
+                followupPrompt,
+                logger: logger!,
+                preferredModel: ollamaModel,
+              });
+              summaryText = stripCodeFences(resp.summary).trim();
+            }
+
+            if (processingId && summaryText) {
+              await convex.mutation(api.procedures.setProcessingSummary, {
+                processingId: (processingId as unknown as Id<"parser_processings">),
+                summary: summaryText,
+                systemPrompt: summarySystemPrompt,
+                userPrompt: summaryUserPrompt,
+              });
+              await logger.log(`✅ Summary saved (${summaryText.length} chars)`);
+            }
+          } catch (e) {
+            await logger.error(`⚠️ Failed to generate summary: ${(e as Error)?.message}`);
+          }
+        }
 
         try {
           request.signal.removeEventListener("abort", abortHandler);
@@ -627,27 +791,28 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function filterNullValues(obj: any): any {
+function filterNullValues(obj: unknown): unknown {
   if (obj === null || obj === undefined) return undefined;
   if (typeof obj !== 'object') return obj;
   if (Array.isArray(obj)) return obj.map(filterNullValues);
 
-  const filtered: any = {};
-  for (const [key, value] of Object.entries(obj)) {
+  const input = obj as Record<string, unknown>;
+  const filtered: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
     if (value !== null) {
       filtered[key] = filterNullValues(value);
     }
   }
-  return filtered;
+  return filtered as unknown;
 }
 
-function simplifyPayload(payload: any, {
+function simplifyPayload(payload: unknown, {
   arraySampleSize = 1,
   maxStringLength = 100,
 }: {
   arraySampleSize?: number;
   maxStringLength?: number;
-} = {}): any {
+} = {}): unknown {
   if (Array.isArray(payload)) {
     // Keep only the first `arraySampleSize` items
     const sampled = payload.slice(0, arraySampleSize).map(item =>
@@ -659,9 +824,9 @@ function simplifyPayload(payload: any, {
     return sampled;
   }
   if (payload !== null && typeof payload === 'object') {
-    const result = {};
-    for (const [key, val] of Object.entries(payload)) {
-      (result as Record<string, unknown>)[key] = simplifyPayload(val, {
+    const result: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(payload as Record<string, unknown>)) {
+      result[key] = simplifyPayload(val, {
         arraySampleSize,
         maxStringLength,
       });
@@ -694,4 +859,15 @@ function sanitizeGeneratedCode(raw: string): string {
     code = code.slice(idx);
   }
   return code.trim();
+}
+
+function stripCodeFences(text: string): string {
+  let t = text.trim();
+  if (t.startsWith("```")) {
+    t = t.replace(/^```[a-zA-Z0-9]*\n?/, "");
+  }
+  if (t.endsWith("```")) {
+    t = t.replace(/\n?```$/, "");
+  }
+  return t.trim();
 }
